@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable
 
-from catia_diff.models.drawing import DimensionKind, Sheet, ToleranceKind
+from catia_diff.models.drawing import Dimension, DimensionKind, Sheet, ToleranceKind
 from catia_diff.models.findings import Category, Finding, Severity
+from catia_diff.rules import analysis
 from catia_diff.rules.base import Rule, RuleContext, RuleMeta, register
+from catia_diff.standards.iso2768 import GeneralToleranceSpec
 
 AGENT = "tolerancing"
 
@@ -43,23 +45,28 @@ class MissingToleranceRule(Rule):
         if general:
             # With a general tolerance note the drawing is valid; only fitting
             # features (holes/shafts) and tight decimals deserve a mention.
+            spec = ctx.general_spec(target)
+            # CAD writes every value with the same number of decimals
+            # (DIMDEC), so decimals only signal intent when they go beyond what
+            # the general tolerance can hold; fitting features always do.
             candidates = [
                 dim
                 for dim in untoleranced
-                if dim.kind is DimensionKind.DIAMETER or (dim.decimals or 0) >= 2
+                if dim.kind is DimensionKind.DIAMETER or (dim.decimals or 0) >= 3
             ]
             if not candidates:
                 return
             for dim in candidates:
+                derived = _derived_text(spec, dim)
                 yield self.finding(
                     message=(
                         f"Dimension {dim.id} ({dim.label()}) relies on the general tolerance "
-                        f"'{general}'. Verify that this is intended for a fitting feature."
+                        f"'{general}'{derived['en']}. Verify that this is enough for a fitting feature."
                     ),
                     message_tr=(
                         f"{dim.id} ({dim.label()}) ölçüsü '{general}' genel toleransına "
-                        f"dayanıyor. Geçme/uyum gerektiren bir unsur için bunun yeterli "
-                        f"olduğunu doğrulayın."
+                        f"dayanıyor{derived['tr']}. Geçme/uyum gerektiren bir unsur için bunun "
+                        f"yeterli olduğunu doğrulayın."
                     ),
                     suggestion="Add an explicit tolerance or an ISO fit class (e.g. H7) to the callout.",
                     suggestion_tr="Gösterime açık bir tolerans veya ISO geçme sınıfı (örn. H7) ekleyin.",
@@ -283,3 +290,295 @@ class MixedToleranceStyleRule(Rule):
             confidence=0.8,
             agent=AGENT,
         )
+
+
+# --------------------------------------------------------------------------
+# ISO 2768: the general tolerance note evaluated as numbers
+# --------------------------------------------------------------------------
+#: Relative slack used when comparing two tolerance values.
+_EPS = 1e-9
+
+
+def _derived_text(spec: GeneralToleranceSpec | None, dim: Dimension) -> dict[str, str]:
+    """" -> ±0.3 mm" fragment appended to a message, when derivable."""
+    if spec is None or not spec.is_usable:
+        return {"en": "", "tr": ""}
+    deviation = spec.deviation_for(dim)
+    if deviation is None:
+        return {"en": "", "tr": ""}
+    unit = "°" if dim.is_angular else f" {dim.units.value}"
+    rendered = f"±{deviation:g}{unit}"
+    return {
+        "en": f" ({spec.designation} gives {rendered})",
+        "tr": f" ({spec.designation} → {rendered})",
+    }
+
+
+@register
+class GeneralToleranceClassRule(Rule):
+    meta = RuleMeta(
+        id="TOL006",
+        title="General tolerance note names no tolerance class",
+        title_tr="Genel tolerans notunda tolerans sınıfı yok",
+        severity=Severity.MAJOR,
+        category=Category.TOLERANCING,
+        standards=("ISO 2768-1 §5", "ISO 2768-2 §5"),
+        description=(
+            "Without a class letter (f/m/c/v, H/K/L) the note fixes no numbers, so "
+            "untoleranced dimensions stay undefined."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        note = ctx.general_tolerance(target)
+        if not note or not target.dimensions:
+            return
+        spec = ctx.general_spec(target)
+        if spec is None:
+            return  # a note that does not reference ISO 2768 at all
+        if spec.unknown_letters:
+            letters = ", ".join(spec.unknown_letters)
+            yield self.finding(
+                message=(
+                    f"The general tolerance note '{spec.raw}' uses unknown class letter(s) "
+                    f"{letters}; valid classes are f/m/c/v (linear) and H/K/L (geometric)."
+                ),
+                message_tr=(
+                    f"'{spec.raw}' genel tolerans notunda tanınmayan sınıf harfi {letters} var; "
+                    f"geçerli sınıflar f/m/c/v (boyut) ve H/K/L (geometrik)."
+                ),
+                suggestion="Correct the designation, e.g. 'ISO 2768-mK'.",
+                suggestion_tr="Gösterimi düzeltin, örn. 'ISO 2768-mK'.",
+                sheet_index=target.index,
+                bbox=target.title_block.bbox,
+                severity=Severity.MINOR,
+                agent=AGENT,
+            )
+        if spec.is_usable:
+            return
+        yield self.finding(
+            message=(
+                f"The general tolerance note '{spec.raw}' names no tolerance class, so no "
+                "permissible deviation can be derived for the untoleranced dimensions."
+            ),
+            message_tr=(
+                f"'{spec.raw}' genel tolerans notu bir tolerans sınıfı belirtmiyor; bu nedenle "
+                "toleranssız ölçüler için izin verilen sapma türetilemiyor."
+            ),
+            suggestion="State the class, e.g. 'ISO 2768-mK' (medium linear, class K geometric).",
+            suggestion_tr="Sınıfı belirtin, örn. 'ISO 2768-mK' (orta boyut sınıfı, K geometrik sınıf).",
+            sheet_index=target.index,
+            bbox=target.title_block.bbox,
+            agent=AGENT,
+        )
+
+
+@register
+class SizeOutsideGeneralToleranceRule(Rule):
+    meta = RuleMeta(
+        id="TOL007",
+        title="Nominal size not covered by the general tolerance table",
+        title_tr="Genel tolerans tablosunun kapsamadığı nominal ölçü",
+        severity=Severity.MAJOR,
+        category=Category.TOLERANCING,
+        standards=("ISO 2768-1 §4",),
+        description=(
+            "ISO 2768-1 starts at 0.5 mm and stops at 4000 mm, and class f has no row "
+            "above 2000 mm; outside those ranges the deviation must be indicated."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        spec = ctx.general_spec(target)
+        if spec is None or spec.linear is None:
+            return
+        for dim in target.dimensions:
+            if dim.has_tolerance or dim.nominal is None or dim.extra.get("thread"):
+                continue
+            if not dim.units.is_length or spec.covers(dim):
+                continue
+            yield self.finding(
+                message=(
+                    f"Dimension {dim.id} ({dim.label()}) is not covered by "
+                    f"{spec.designation}: the table gives no deviation for this nominal size."
+                ),
+                message_tr=(
+                    f"{dim.id} ({dim.label()}) ölçüsü {spec.designation} kapsamında değil: "
+                    f"tablo bu nominal ölçü için sapma vermiyor."
+                ),
+                suggestion="Indicate the deviation directly on this dimension.",
+                suggestion_tr="Sapmayı doğrudan bu ölçünün üzerinde belirtin.",
+                sheet_index=target.index,
+                bbox=dim.bbox,
+                object_ids=[dim.id],
+                agent=AGENT,
+            )
+
+
+@register
+class LooserThanGeneralRule(Rule):
+    meta = RuleMeta(
+        id="TOL008",
+        title="Indicated tolerance is looser than the general tolerance",
+        title_tr="Belirtilen tolerans genel toleranstan daha geniş",
+        severity=Severity.MINOR,
+        category=Category.TOLERANCING,
+        standards=("ISO 2768-1 §4", "ISO 8015"),
+        description=(
+            "Permitted, but it relaxes the drawing: an indicated tolerance is normally "
+            "there to tighten a feature, so a wider one is usually a mistake."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        spec = ctx.general_spec(target)
+        if spec is None or spec.linear is None:
+            return
+        for dim in target.dimensions:
+            deviations = analysis.tolerance_deviations(dim)
+            general = spec.deviation_for(dim)
+            if deviations is None or general is None:
+                continue
+            upper, lower = deviations
+            slack = general * _EPS + _EPS
+            if upper <= general + slack and lower >= -general - slack:
+                continue
+            unit = "°" if dim.is_angular else f" {dim.units.value}"
+            yield self.finding(
+                message=(
+                    f"Dimension {dim.id} ({dim.label()}) is toleranced "
+                    f"+{upper:g}/{lower:g}{unit}, wider than the general tolerance "
+                    f"{spec.designation} (±{general:g}{unit})."
+                ),
+                message_tr=(
+                    f"{dim.id} ({dim.label()}) ölçüsünün toleransı +{upper:g}/{lower:g}{unit}; "
+                    f"bu, {spec.designation} genel toleransından (±{general:g}{unit}) daha geniş."
+                ),
+                suggestion=(
+                    "Confirm the relaxation is intended; otherwise tighten it or drop it and "
+                    "let the general tolerance apply."
+                ),
+                suggestion_tr=(
+                    "Genişletmenin bilinçli olduğunu doğrulayın; değilse toleransı daraltın ya "
+                    "da kaldırıp genel toleransın geçerli olmasını sağlayın."
+                ),
+                sheet_index=target.index,
+                bbox=dim.bbox,
+                object_ids=[dim.id],
+                snippet=dim.text,
+                agent=AGENT,
+            )
+
+
+@register
+class RedundantGeneralToleranceRule(Rule):
+    meta = RuleMeta(
+        id="TOL009",
+        title="Indicated tolerance repeats the general tolerance",
+        title_tr="Belirtilen tolerans genel toleransı tekrar ediyor",
+        severity=Severity.INFO,
+        category=Category.TOLERANCING,
+        standards=("ISO 2768-1 §4",),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        spec = ctx.general_spec(target)
+        if spec is None or spec.linear is None:
+            return
+        for dim in target.dimensions:
+            deviations = analysis.tolerance_deviations(dim)
+            general = spec.deviation_for(dim)
+            if deviations is None or general is None:
+                continue
+            upper, lower = deviations
+            tolerance = max(abs(general) * 1e-6, 1e-9)
+            if abs(upper - general) > tolerance or abs(lower + general) > tolerance:
+                continue
+            unit = "°" if dim.is_angular else f" {dim.units.value}"
+            yield self.finding(
+                message=(
+                    f"Dimension {dim.id} ({dim.label()}) repeats the general tolerance "
+                    f"±{general:g}{unit} of {spec.designation}."
+                ),
+                message_tr=(
+                    f"{dim.id} ({dim.label()}) ölçüsü {spec.designation} genel toleransını "
+                    f"(±{general:g}{unit}) tekrar ediyor."
+                ),
+                suggestion="Remove the indication; the general tolerance already covers it.",
+                suggestion_tr="Gösterimi kaldırın; genel tolerans bu ölçüyü zaten kapsıyor.",
+                sheet_index=target.index,
+                bbox=dim.bbox,
+                object_ids=[dim.id],
+                snippet=dim.text,
+                agent=AGENT,
+            )
+
+
+@register
+class ToleranceStackRule(Rule):
+    meta = RuleMeta(
+        id="TOL010",
+        title="Tolerance stack exceeds the overall dimension's tolerance",
+        title_tr="Tolerans birikimi toplam ölçünün toleransını aşıyor",
+        severity=Severity.MAJOR,
+        category=Category.TOLERANCING,
+        standards=("ISO 129-1 §6.4", "ISO 2768-1 §4", "ASME Y14.5-2018 §1.4(m)"),
+        description=(
+            "In a closed chain the worst-case sum of the individual tolerances must fit "
+            "inside the overall tolerance, otherwise the part cannot be made to drawing."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        chains = analysis.find_closed_chains(target)
+        if not chains:
+            return
+        spec = ctx.general_spec(target)
+        for overall, parts in chains:
+            overall_width = _effective_width(overall, spec)
+            part_widths = [_effective_width(part, spec) for part in parts]
+            if overall_width is None or any(width is None for width in part_widths):
+                continue
+            stack = sum(width for width in part_widths if width is not None)
+            if stack <= overall_width * (1 + _EPS) + _EPS:
+                continue
+            unit = f" {overall.units.value}"
+            yield self.finding(
+                message=(
+                    f"The chain {' + '.join(part.label() for part in parts)} accumulates "
+                    f"±{stack / 2:g}{unit} while the overall dimension {overall.label()} allows "
+                    f"only ±{overall_width / 2:g}{unit}."
+                ),
+                message_tr=(
+                    f"{' + '.join(part.label() for part in parts)} zinciri ±{stack / 2:g}{unit} "
+                    f"birikim üretiyor; toplam ölçü {overall.label()} ise yalnızca "
+                    f"±{overall_width / 2:g}{unit} izin veriyor."
+                ),
+                suggestion=(
+                    "Release one dimension of the chain (auxiliary/reference), tighten the "
+                    "individual tolerances, or widen the overall one - see DIM003."
+                ),
+                suggestion_tr=(
+                    "Zincirdeki bir ölçüyü serbest bırakın (yardımcı/referans), tek tek "
+                    "toleransları daraltın ya da toplam ölçünün toleransını genişletin - "
+                    "DIM003'e bakın."
+                ),
+                sheet_index=target.index,
+                bbox=overall.bbox,
+                object_ids=[overall.id, *(part.id for part in parts)],
+                confidence=0.8,
+                agent=AGENT,
+            )
+
+
+def _effective_width(dim: Dimension, spec: GeneralToleranceSpec | None) -> float | None:
+    """Tolerance zone width of ``dim``: indicated if present, else general."""
+    width = analysis.tolerance_width(dim)
+    if width is not None:
+        return width
+    if dim.is_basic or dim.is_reference:
+        return None  # basic dimensions carry no zone; reference ones are not binding
+    if spec is None:
+        return None
+    deviation = spec.deviation_for(dim)
+    return None if deviation is None else deviation * 2.0

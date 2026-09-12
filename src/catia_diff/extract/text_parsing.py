@@ -505,14 +505,21 @@ class ParsedSurfaceFinish:
     raw: str
 
 
-_RA_RE = re.compile(rf"\bRa\s*=?\s*({_NUM})", re.IGNORECASE)
-_RZ_RE = re.compile(rf"\bRz\s*=?\s*({_NUM})", re.IGNORECASE)
-_SURFACE_MARKERS = ("√", "∇", "⊽", "Ra", "Rz", "RA", "RZ")
+_RA_RE = re.compile(rf"(?<![A-Za-z])Ra\s*=?\s*({_NUM})", re.IGNORECASE)
+_RZ_RE = re.compile(rf"(?<![A-Za-z])Rz\s*=?\s*({_NUM})", re.IGNORECASE)
+_SURFACE_GLYPHS = ("√", "∇", "⊽")
+#: "Ra"/"Rz" only count as roughness parameters when they stand alone - as a
+#: substring they hide inside ordinary words ("GENEL TOLE**RA**NSLAR").
+_SURFACE_PARAM_RE = re.compile(r"(?<![A-Za-z])R[az](?![A-Za-z])", re.IGNORECASE)
 
 
 def parse_surface_finish(raw: str | None) -> ParsedSurfaceFinish | None:
     text = normalize_drawing_text(raw).replace("\x01gdt\x01", "")
-    if not text or not any(marker in text for marker in _SURFACE_MARKERS):
+    if not text:
+        return None
+    if not (
+        any(glyph in text for glyph in _SURFACE_GLYPHS) or _SURFACE_PARAM_RE.search(text)
+    ):
         return None
     ra_match = _RA_RE.search(text)
     rz_match = _RZ_RE.search(text)
@@ -548,8 +555,11 @@ class ParsedWeld:
     raw: str
 
 
+#: ISO 2553 weld size: the letter and the value are written together ("a5",
+#: "z6-50x100"). Allowing a space would swallow captions such as "DETAIL A 2".
 _WELD_RE = re.compile(
-    rf"\b([az])\s*({_NUM})(?:\s*-\s*(\d+)\s*[x×]\s*(\d+))?", re.IGNORECASE
+    r"(?<![A-Za-z])([az])(\d+(?:[.,]\d+)?)(?:\s*-\s*(\d+)\s*[x×]\s*(\d+))?",
+    re.IGNORECASE,
 )
 _WELD_WORDS = re.compile(
     r"\b(fillet|kaynak|weld|butt|square|bevel|köşe|alın)\b", re.IGNORECASE

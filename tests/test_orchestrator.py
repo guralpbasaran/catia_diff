@@ -24,6 +24,29 @@ def test_end_to_end_audit_of_the_sample_drawing(sample_dxf, config):
     assert {"TD-1001_sample_audit.json", "TD-1001_sample_audit.md", "TD-1001_sample_audit.html"} <= names
 
 
+def test_iso2768_rules_fire_end_to_end(sample_dxf_iso2768, config):
+    report = Orchestrator(config).audit(sample_dxf_iso2768)
+    found = {finding.rule_id for finding in report.findings}
+    assert {"TOL007", "TOL008", "TOL009", "TOL010", "GDT011"} <= found
+
+    stack = next(f for f in report.findings if f.rule_id == "TOL010")
+    assert "±0.7" in stack.message and "±0.3" in stack.message
+    looser = next(f for f in report.findings if f.rule_id == "TOL008")
+    assert "ISO 2768-mK" in looser.message
+
+    # the sheet now states a general tolerance, so TB008 must stay quiet
+    assert "TB008" not in found
+
+
+def test_general_tolerance_note_is_not_a_surface_symbol(sample_dxf_iso2768, config):
+    """Regression: 'GENEL TOLERANSLAR' contains 'RA' but is not an Ra callout."""
+    report = Orchestrator(config).audit(sample_dxf_iso2768)
+    surface_findings = [f for f in report.findings if f.rule_id == "SYM001"]
+    # only the intentional bare "√" symbol, never the note
+    assert len(surface_findings) == 1
+    assert report.document_stats["surface_finishes"] == 1
+
+
 def test_written_json_carries_the_agent_trace(sample_dxf, config):
     Orchestrator(config).audit(sample_dxf)
     payload = json.loads((config.output_dir / "TD-1001_sample_audit.json").read_text())

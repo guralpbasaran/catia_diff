@@ -3,10 +3,24 @@
 Run::
 
     python examples/generate_sample_drawing.py examples/sample_plate.dxf
+    python examples/generate_sample_drawing.py examples/sample_plate_2768.dxf --iso2768
 
 The produced sheet is a 80 x 40 plate with four holes and the following
 *intentional* problems, one per rule family:
 
+==========================  ======================================================
+
+With ``--iso2768`` the sheet additionally carries a ``ISO 2768-mK`` note and the
+defects that only a numeric general tolerance can expose:
+
+==========================  ======================================================
+Defect                      Expected rule
+==========================  ======================================================
+±1.5 on a 40 mm feature     TOL008 indicated tolerance looser than ISO 2768-m (±0.3)
+±0.3 on a 56 mm feature     TOL009 indicated tolerance repeats the general one
+0.3 mm dimension            TOL007 nominal size below the 0.5 mm table start
+12 + 56 + 12 = 80 chain     TOL010 stack ±0.7 against an overall ±0.3
+flatness 0.8                GDT011 looser than the ISO 2768-K general flatness
 ==========================  ======================================================
 Defect                      Expected rule
 ==========================  ======================================================
@@ -36,7 +50,7 @@ HOLES = [(12.0, 10.0), (12.0, 30.0), (68.0, 10.0), (68.0, 30.0)]
 HOLE_R = 3.25
 
 
-def build() -> ezdxf.document.Drawing:
+def build(with_general_tolerance: bool = False) -> ezdxf.document.Drawing:
     doc = ezdxf.new("R2018", setup=True)
     doc.header["$INSUNITS"] = 4  # millimetres
     doc.header["$LUPREC"] = 2
@@ -96,9 +110,52 @@ def build() -> ezdxf.document.Drawing:
         dxfattribs={"layer": "TEXT", "char_height": 2.5},
     ).set_location((0, 60))
 
+    if with_general_tolerance:
+        _iso2768_variant(msp)
+
     # -- title block ------------------------------------------------------
     _title_block(doc, msp)
     return doc
+
+
+def _iso2768_variant(msp) -> None:
+    """Add an ISO 2768-mK note plus the defects it makes measurable."""
+    msp.add_mtext(
+        "GENEL TOLERANSLAR ISO 2768-mK",
+        dxfattribs={"layer": "TEXT", "char_height": 2.5},
+    ).set_location((0, 56))
+
+    # ±1.5 on a 40 mm feature: ISO 2768-m allows ±0.3 -> TOL008
+    msp.add_linear_dim(
+        base=(-26, 0),
+        p1=(0, 0),
+        p2=(0, PLATE_H),
+        angle=90,
+        override={"dimtol": 1, "dimtp": 1.5, "dimtm": 1.5},
+        dxfattribs={"layer": "DIMS"},
+    ).render()
+
+    # ±0.3 on a 56 mm feature: exactly the general tolerance -> TOL009
+    msp.add_linear_dim(
+        base=(12, -34),
+        p1=(12, 0),
+        p2=(68, 0),
+        override={"dimtol": 1, "dimtp": 0.3, "dimtm": 0.3},
+        dxfattribs={"layer": "DIMS"},
+    ).render()
+
+    # A 0.3 mm step: below the 0.5 mm start of the ISO 2768-1 table -> TOL007
+    msp.add_line((0, PLATE_H), (0, PLATE_H + 0.3), dxfattribs={"layer": "PART"})
+    msp.add_linear_dim(
+        base=(-34, PLATE_H),
+        p1=(0, PLATE_H),
+        p2=(0, PLATE_H + 0.3),
+        angle=90,
+        dxfattribs={"layer": "DIMS"},
+    ).render()
+
+    # Flatness 0.8 where class K allows 0.2 for this size -> GDT011
+    msp.add_mtext("⏥|0.8", dxfattribs={"layer": "GDT", "char_height": 3.0}).set_location((60, 52))
 
 
 def _title_block(doc: ezdxf.document.Drawing, msp) -> None:
@@ -128,10 +185,12 @@ def _title_block(doc: ezdxf.document.Drawing, msp) -> None:
 
 
 def main(argv: list[str]) -> int:
-    target = Path(argv[1]) if len(argv) > 1 else Path("examples/sample_plate.dxf")
+    args = [arg for arg in argv[1:] if not arg.startswith("--")]
+    variant = "--iso2768" in argv[1:]
+    target = Path(args[0]) if args else Path("examples/sample_plate.dxf")
     target.parent.mkdir(parents=True, exist_ok=True)
-    build().saveas(target)
-    print(f"wrote {target}")
+    build(with_general_tolerance=variant).saveas(target)
+    print(f"wrote {target}" + (" (with ISO 2768-mK note)" if variant else ""))
     return 0
 
 

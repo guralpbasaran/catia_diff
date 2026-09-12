@@ -22,6 +22,7 @@ from catia_diff.extract.text_parsing import detect_general_tolerance
 from catia_diff.models.drawing import DrawingDocument, Sheet
 from catia_diff.models.findings import Category, Evidence, Finding, Severity
 from catia_diff.models.geometry import BBox
+from catia_diff.standards.iso2768 import GeneralToleranceSpec, parse_designation, to_mm
 
 Scope = Literal["sheet", "document"]
 
@@ -47,9 +48,11 @@ class RuleContext:
         self.document = document
         self.config = config
         self._general_tolerance: dict[int, str | None] = {}
+        self._general_spec: dict[int, GeneralToleranceSpec | None] = {}
 
     # -- cached derivations -------------------------------------------------
     def general_tolerance(self, sheet: Sheet) -> str | None:
+        """The general tolerance note as written on the sheet."""
         if sheet.index not in self._general_tolerance:
             value = sheet.title_block.value("general_tolerance")
             note = detect_general_tolerance(sheet.notes_text())
@@ -58,6 +61,38 @@ class RuleContext:
 
     def has_general_tolerance(self, sheet: Sheet) -> bool:
         return bool(self.general_tolerance(sheet))
+
+    def general_spec(self, sheet: Sheet) -> GeneralToleranceSpec | None:
+        """The general tolerance note parsed into ISO 2768 classes.
+
+        ``None`` when the sheet states no note; a spec whose ``is_usable`` is
+        False when it states one that names no class (then no number can be
+        derived from it).
+        """
+        if sheet.index not in self._general_spec:
+            note = self.general_tolerance(sheet)
+            sources = [note, sheet.notes_text(), sheet.title_block.value("general_tolerance")]
+            spec = next(
+                (parsed for source in sources if (parsed := parse_designation(source))), None
+            )
+            self._general_spec[sheet.index] = spec
+        return self._general_spec[sheet.index]
+
+    def governing_length_mm(self, sheet: Sheet) -> float | None:
+        """Largest linear size on the sheet, in mm.
+
+        ISO 2768-2 indexes its tables by the feature's nominal length, which a
+        feature control frame does not state.  The largest dimension is the
+        conservative stand-in: it yields the widest general tolerance, so a
+        rule comparing against it under-reports rather than over-reports.
+        """
+        sizes = [
+            to_mm(dim.nominal, dim.units)
+            for dim in sheet.dimensions
+            if dim.nominal is not None and dim.units.is_length
+        ]
+        values = [size for size in sizes if size is not None]
+        return max(values) if values else None
 
     @property
     def profile(self) -> Profile:

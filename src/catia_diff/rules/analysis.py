@@ -18,6 +18,7 @@ from catia_diff.models.drawing import (
     GeometryFeature,
     GeometryKind,
     Sheet,
+    ToleranceKind,
 )
 
 #: Layers whose circles are construction geometry rather than real features.
@@ -276,3 +277,33 @@ def outside_sheet(sheet: Sheet, margin_ratio: float = 0.0) -> list[str]:
         for obj in sheet.objects()
         if obj.bbox is not None and not inner.contains(obj.bbox) and not inner.intersects(obj.bbox)
     ]
+
+
+# --------------------------------------------------------------------------
+# Tolerance arithmetic
+# --------------------------------------------------------------------------
+#: Tolerance notations that carry numbers we can compute with.  Fit classes
+#: (H7, g6) do not: their numeric limits come from ISO 286, which this package
+#: does not tabulate, so they are reported as "unknown" rather than guessed.
+_NUMERIC_KINDS = {ToleranceKind.SYMMETRIC, ToleranceKind.DEVIATION, ToleranceKind.LIMITS}
+
+
+def tolerance_deviations(dim: Dimension) -> tuple[float, float] | None:
+    """Explicit deviations of ``dim`` as ``(upper, lower)`` around its nominal."""
+    tol = dim.tolerance
+    if tol.kind not in _NUMERIC_KINDS or tol.upper is None or tol.lower is None:
+        return None
+    if tol.kind is ToleranceKind.LIMITS:
+        if dim.nominal is None:
+            return None
+        return (tol.upper - dim.nominal, tol.lower - dim.nominal)
+    return (tol.upper, tol.lower)
+
+
+def tolerance_width(dim: Dimension) -> float | None:
+    """Width of the explicit tolerance zone of ``dim``."""
+    deviations = tolerance_deviations(dim)
+    if deviations is None:
+        return None
+    upper, lower = deviations
+    return abs(upper - lower)
