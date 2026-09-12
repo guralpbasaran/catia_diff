@@ -160,6 +160,8 @@ dönüştürülür. Bilinmeyen boyut bilgisi (açının kısa kenarı, çerçeve
 olduğu unsurun boyu) için **en geniş** genel tolerans seçilir; böylece
 "yazılı tolerans genel toleranstan geniş mi" sorusu yanlış pozitif üretmez.
 
+Tabloların tamamı ve varsayımların gerekçesi: [`ISO2768.md`](ISO2768.md).
+
 ## 6. Çok modlu çıkarım / Multimodal extraction
 
 `llm/` katmanı arka uçtan bağımsızdır:

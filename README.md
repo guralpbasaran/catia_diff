@@ -46,6 +46,9 @@ içerir. Standardın tanımlamadığı yerler (silindiriklik, konum, açısallı
 `None` döner ve kural sessiz kalır — tahmin üretilmez. `in` biriminde çizilmiş
 resimlerde değerler mm'ye çevrilip geri dönüştürülür.
 
+Tabloların tamamı, kural eşlemesi, varsayımlar ve Python API'si:
+[`docs/ISO2768.md`](docs/ISO2768.md).
+
 ## Kurulum / Install
 
 ```bash
@@ -126,7 +129,8 @@ Orchestrator
 ```
 
 Ayrıntılar, akış diyagramı, mesaj protokolü ve veri modeli:
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · ISO 2768 sayısal referansı:
+[`docs/ISO2768.md`](docs/ISO2768.md).
 
 ## Yeni kural ekleme / Adding a rule
 
