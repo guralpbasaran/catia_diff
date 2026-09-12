@@ -583,3 +583,143 @@ def _effective_width(dim: Dimension, spec: GeneralToleranceSpec | None) -> float
         return None
     deviation = spec.deviation_for(dim)
     return None if deviation is None else deviation * 2.0
+
+
+# --------------------------------------------------------------------------
+# ISO 286: fit classes resolved to numbers
+# --------------------------------------------------------------------------
+_GAP_REASON = {
+    "size": (
+        "the nominal size lies outside the ISO 286 tables (0.5-500 mm)",
+        "nominal ölçü ISO 286 tablolarının dışında (0,5-500 mm)",
+    ),
+    "letter": (
+        "this tolerance letter is not implemented",
+        "bu tolerans harfi uygulanmış değil",
+    ),
+    "grade": (
+        "this IT grade is not implemented (IT5-IT14 are)",
+        "bu IT derecesi uygulanmış değil (IT5-IT14 var)",
+    ),
+}
+
+
+@register
+class UnresolvedFitClassRule(Rule):
+    meta = RuleMeta(
+        id="TOL011",
+        title="Fit class cannot be resolved to numbers",
+        title_tr="Geçme sınıfı sayıya çevrilemiyor",
+        severity=Severity.MINOR,
+        category=Category.TOLERANCING,
+        standards=("ISO 286-1",),
+        description=(
+            "Reported so that a fit the numeric checks had to skip is visible, "
+            "instead of silently passing every tolerance rule."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        from catia_diff.standards import iso286
+        from catia_diff.standards.iso2768 import to_mm
+
+        for dim in target.dimensions:
+            fit = analysis.fit_class_of(dim)
+            if fit is None:
+                continue
+            nominal_mm = to_mm(dim.nominal, dim.units)
+            unresolved = [
+                item
+                for item in (
+                    (fit,) if isinstance(fit, iso286.FitClass) else (fit.hole, fit.shaft)
+                )
+                if iso286.coverage_gap(nominal_mm, item) is not None
+            ]
+            if not unresolved:
+                continue
+            first = unresolved[0]
+            reason = iso286.coverage_gap(nominal_mm, first) or "letter"
+            reason_en, reason_tr = _GAP_REASON[reason]
+            yield self.finding(
+                message=(
+                    f"Dimension {dim.id} ({dim.label()}) carries fit class "
+                    f"{first.designation}, but {reason_en}; the numeric tolerance checks "
+                    "skipped this dimension."
+                ),
+                message_tr=(
+                    f"{dim.id} ({dim.label()}) ölçüsünde {first.designation} geçme sınıfı var "
+                    f"ancak {reason_tr}; sayısal tolerans denetimleri bu ölçüyü atladı."
+                ),
+                suggestion="State the deviations directly on this dimension.",
+                suggestion_tr="Sapmaları doğrudan bu ölçünün üzerinde yazın.",
+                sheet_index=target.index,
+                bbox=dim.bbox,
+                object_ids=[dim.id],
+                snippet=dim.text,
+                agent=AGENT,
+            )
+
+
+@register
+class InterferenceFitRule(Rule):
+    meta = RuleMeta(
+        id="TOL012",
+        title="Fit requires assembly provisions",
+        title_tr="Geçme, montaj önlemi gerektiriyor",
+        severity=Severity.INFO,
+        category=Category.TOLERANCING,
+        standards=("ISO 286-1 §5",),
+        description=(
+            "A transition or interference fit cannot be assembled by hand; it needs "
+            "a press, heating or cooling, which the drawing should anticipate."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        from catia_diff.standards import iso286
+        from catia_diff.standards.iso2768 import to_mm
+
+        for dim in target.dimensions:
+            pair = analysis.fit_class_of(dim)
+            if not isinstance(pair, iso286.FitPair):
+                continue
+            nominal_mm = to_mm(dim.nominal, dim.units)
+            character = iso286.fit_character(nominal_mm, pair)
+            if character in (None, "clearance"):
+                continue
+            limits = iso286.clearance(nominal_mm, pair)
+            assert limits is not None  # fit_character would have returned None
+            low, high = (value * 1000 for value in limits)
+            if character == "interference":
+                article = "an"
+                consequence = "it cannot be assembled without a press or a temperature difference"
+                consequence_tr = "pres veya sıcaklık farkı olmadan monte edilemez"
+                character_tr = "sıkı"
+            else:
+                # A transition fit lands either way depending on the actual parts.
+                article = "a"
+                consequence = "individual parts may come out tight, so hand assembly is not assured"
+                consequence_tr = "parçalara göre sıkı çıkabilir, elle montaj garanti değildir"
+                character_tr = "geçiş"
+            yield self.finding(
+                message=(
+                    f"{pair.designation} on {dim.label()} is {article} {character} fit "
+                    f"({low:+.0f} to {high:+.0f} µm); {consequence}."
+                ),
+                message_tr=(
+                    f"{dim.label()} ölçüsündeki {pair.designation} bir {character_tr} geçmedir "
+                    f"({low:+.0f} … {high:+.0f} µm); {consequence_tr}."
+                ),
+                suggestion=(
+                    "Confirm the assembly method (press, heat/cool) and note it on the drawing."
+                ),
+                suggestion_tr=(
+                    "Montaj yöntemini (pres, ısıtma/soğutma) doğrulayın ve resimde belirtin."
+                ),
+                sheet_index=target.index,
+                bbox=dim.bbox,
+                object_ids=[dim.id],
+                snippet=dim.text,
+                confidence=0.9,
+                agent=AGENT,
+            )

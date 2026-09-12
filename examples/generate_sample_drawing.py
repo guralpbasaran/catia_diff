@@ -5,6 +5,7 @@ Run::
     python examples/generate_sample_drawing.py examples/sample_plate.dxf
     python examples/generate_sample_drawing.py examples/sample_plate_2768.dxf --iso2768
     python examples/generate_sample_drawing.py examples/sample_plate_ok.dxf --complete
+    python examples/generate_sample_drawing.py examples/sample_plate_fits.dxf --fits
 
 The produced sheet is a 80 x 40 plate with four holes and the following
 *intentional* problems, one per rule family:
@@ -58,7 +59,9 @@ HOLE_R = 3.25
 
 
 def build(
-    with_general_tolerance: bool = False, complete: bool = False
+    with_general_tolerance: bool = False,
+    complete: bool = False,
+    fits: bool = False,
 ) -> ezdxf.document.Drawing:
     doc = ezdxf.new("R2018", setup=True)
     doc.header["$INSUNITS"] = 4  # millimetres
@@ -67,6 +70,11 @@ def build(
     for name in ("PART", "DIMS", "GDT", "TEXT", "TITLE"):
         if name not in doc.layers:
             doc.layers.add(name)
+
+    if fits:
+        _fitted_plate(msp)
+        _title_block(doc, msp, complete=True)
+        return doc
 
     if complete:
         _complete_plate(msp)
@@ -172,6 +180,53 @@ def _iso2768_variant(msp) -> None:
     msp.add_mtext("⏥|0.8", dxfattribs={"layer": "GDT", "char_height": 3.0}).set_location((60, 52))
 
 
+def _fitted_plate(msp) -> None:
+    """A bearing plate whose bores carry ISO 286 fit classes.
+
+    Fully dimensioned on purpose, so the only findings are the ones the fit
+    classes themselves raise:
+
+    ==========================  ==================================================
+    Callout                     Expected rule
+    ==========================  ==================================================
+    ⌀25 H7/p6                   TOL012 interference fit - needs a press
+    ⌀40 u6                      TOL011 letter outside the implemented tables
+    ==========================  ==================================================
+    """
+    width, height = 120.0, 60.0
+    bores = [((30.0, 30.0), 12.5, "%%c25 H7/p6"), ((85.0, 30.0), 20.0, "%%c40 u6")]
+    style = {"layer": "DIMS"}
+
+    msp.add_lwpolyline(
+        [(0, 0), (width, 0), (width, height), (0, height)],
+        close=True,
+        dxfattribs={"layer": "PART"},
+    )
+    for center, radius, text in bores:
+        msp.add_circle(center, radius, dxfattribs={"layer": "PART"})
+        msp.add_diameter_dim(
+            center=center, radius=radius, angle=135, text=text, dxfattribs=style
+        ).render()
+
+    # Spanning tree on both axes: every centre is reachable, nothing is doubled.
+    for base, p1, p2 in (
+        ((0, -22), (0, 0), (width, 0)),
+        ((0, -12), (0, 0), (30, 0)),
+        ((85, -12), (85, 0), (width, 0)),
+    ):
+        msp.add_linear_dim(base=base, p1=p1, p2=p2, dxfattribs=style).render()
+    for base, p1, p2 in (((-22, 0), (0, 0), (0, height)), ((-12, 0), (0, 0), (0, 30))):
+        msp.add_linear_dim(base=base, p1=p1, p2=p2, angle=90, dxfattribs=style).render()
+
+    msp.add_mtext(
+        "GENEL TOLERANSLAR ISO 2768-mK\PÖLÇÜLER MM CİNSİNDENDİR\P3. AÇI İZDÜŞÜMÜ",
+        dxfattribs={"layer": "TEXT", "char_height": 2.5},
+    ).set_location((0, 72))
+    msp.add_mtext("√ Ra 1.6", dxfattribs={"layer": "TEXT", "char_height": 3.0}).set_location(
+        (100, 66)
+    )
+
+
 def _complete_plate(msp) -> None:
     """The same plate, dimensioned so that every position is derivable.
 
@@ -251,10 +306,19 @@ def main(argv: list[str]) -> int:
     flags = argv[1:]
     variant = "--iso2768" in flags
     complete = "--complete" in flags
+    fits = "--fits" in flags
     target = Path(args[0]) if args else Path("examples/sample_plate.dxf")
     target.parent.mkdir(parents=True, exist_ok=True)
-    build(with_general_tolerance=variant, complete=complete).saveas(target)
-    note = " (fully dimensioned)" if complete else (" (with ISO 2768-mK note)" if variant else "")
+    build(with_general_tolerance=variant, complete=complete, fits=fits).saveas(target)
+    note = (
+        " (ISO 286 fit classes)"
+        if fits
+        else " (fully dimensioned)"
+        if complete
+        else " (with ISO 2768-mK note)"
+        if variant
+        else ""
+    )
     print(f"wrote {target}{note}")
     return 0
 

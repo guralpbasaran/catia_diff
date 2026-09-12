@@ -149,6 +149,12 @@ GeneralToleranceSpec(standard="ISO 2768", linear=m, geometric=K)
    ±0.3 mm (56 mm, tablo 1)          0.2 mm (düzlemsellik, 80 mm, sınıf K)
 ```
 
+`iso286.py` aynı yaklaşımı ISO 286 için uygular: IT dereceleri ve mil temel
+sapmaları tablodur, **delik sapmaları standardın kendi kurallarıyla türetilir**
+(`EI = −es`; K/M/N/P için `ES = −ei + Δ`), kapsam dışı her kombinasyon `None`
+döner. `⌀25 H7` böylece `+0,021/0`'a çözülür ve tüm sayısal tolerans kuralları
+geçmeli ölçülerde de çalışır.
+
 Kural tarafı bunları `RuleContext.general_spec(sheet)` üzerinden alır; `TOL006`
 notun okunabilirliğini, `TOL007` kapsamı, `TOL008`/`TOL009` yazılı toleransla
 karşılaştırmayı, `TOL010` zincir birikimini ve `GDT011` geometrik karşılaştırmayı
@@ -202,6 +208,7 @@ vermez ve kurallar o zaman hiç çalışmaz. Ayrıntı: [`DIMENSION_COVERAGE.md`
 | Ajan başına hata kapsaması | Bir ajanın çökmesi "temiz rapor" üretmemeli. |
 | `confidence` alanı | Sezgisel kural ile kesin kural aynı listede ama ayırt edilebilir. |
 | İsteğe bağlı bağımlılıklar | Çekirdek yalnızca pydantic ister; ezdxf/PyMuPDF/Pillow/anthropic yoksa ilgili yol kapanır, program çalışır. |
-| Standart tabloları ayrı paket | ISO 2768 verisi kural mantığından bağımsız; test edilebilir, genişletilebilir (ISO 286 aynı yere girer). |
+| Standart tabloları ayrı paket | ISO 2768 ve ISO 286 verisi kural mantığından bağımsız; test edilebilir, genişletilebilir. |
+| Tablolar formülle denetlenir | Standardın üretici formülü, testte transkripsiyon hatası dedektörü olarak kullanılır. |
 | Tanımsız yerde `None` | Standardın vermediği değer (silindiriklik, konum) uydurulmaz; kural sessiz kalır. |
 | Kapsam analizi kesin ya da yok | Aralık verisi olmadan tahmin yürütmek yerine kural hiç çalışmaz. |

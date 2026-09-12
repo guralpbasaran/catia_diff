@@ -255,3 +255,69 @@ def test_general_tolerance_may_come_from_the_title_block():
         title_block=titled(general_tolerance="ISO 2768-mK"),
     )
     assert len(run("TOL008", sheet)) == 1
+
+
+# --------------------------------------------------------- ISO 286 fit rules
+def fitted(dim_id: str, nominal: float, fit: str, text: str):
+    from catia_diff.models.drawing import DimensionKind
+
+    return make_dimension(
+        dim_id,
+        nominal=nominal,
+        kind=DimensionKind.DIAMETER,
+        text=text,
+        tolerance=Tolerance(kind=ToleranceKind.FIT_CLASS, fit_class=fit),
+    )
+
+
+def test_tol011_reports_a_fit_outside_the_tables():
+    sheet = make_sheet(dimensions=[fitted("DIM1", 25.0, "u6", "⌀25 u6")])
+    findings = run("TOL011", sheet)
+    assert len(findings) == 1
+    assert "letter" in findings[0].message
+    assert findings[0].severity is Severity.MINOR
+
+
+def test_tol011_names_a_size_outside_the_tables():
+    sheet = make_sheet(dimensions=[fitted("DIM1", 900.0, "H7", "⌀900 H7")])
+    findings = run("TOL011", sheet)
+    assert len(findings) == 1
+    assert "500" in findings[0].message
+
+
+def test_tol011_quiet_for_a_resolvable_fit():
+    assert run("TOL011", make_sheet(dimensions=[fitted("DIM1", 25.0, "H7", "⌀25 H7")])) == []
+    assert run("TOL011", make_sheet(dimensions=[fitted("DIM1", 25.0, "H7/g6", "⌀25 H7/g6")])) == []
+
+
+def test_tol012_flags_interference_and_transition_fits():
+    interference = make_sheet(dimensions=[fitted("DIM1", 25.0, "H7/p6", "⌀25 H7/p6")])
+    findings = run("TOL012", interference)
+    assert len(findings) == 1
+    assert "interference" in findings[0].message
+    assert "press" in findings[0].message
+
+    transition = make_sheet(dimensions=[fitted("DIM1", 25.0, "H7/k6", "⌀25 H7/k6")])
+    findings = run("TOL012", transition)
+    assert len(findings) == 1
+    assert "transition" in findings[0].message
+
+
+def test_tol012_quiet_for_a_clearance_fit():
+    assert run("TOL012", make_sheet(dimensions=[fitted("DIM1", 25.0, "H7/g6", "⌀25 H7/g6")])) == []
+    assert run("TOL012", make_sheet(dimensions=[fitted("DIM1", 25.0, "H7", "⌀25 H7")])) == []
+
+
+def test_fit_classes_now_participate_in_the_iso2768_comparison():
+    """A fit wider than the general tolerance is no longer invisible."""
+    loose = make_sheet(
+        dimensions=[fitted("DIM1", 25.0, "H13", "⌀25 H13")],
+        annotations=[note("ISO 2768-f")],
+    )
+    assert len(run("TOL008", loose)) == 1
+
+    tight = make_sheet(
+        dimensions=[fitted("DIM1", 25.0, "H7", "⌀25 H7")],
+        annotations=[note("ISO 2768-f")],
+    )
+    assert run("TOL008", tight) == []
