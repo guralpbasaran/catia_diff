@@ -1,0 +1,152 @@
+# catia_diff — 2B teknik resim denetim ajanları
+
+2B teknik resimlerdeki **eksik, hatalı veya tutarsız** unsurları bulan çok ajanlı
+bir denetim aracı. DXF ve PDF girdilerini vektörel olarak ayrıştırır, taranmış
+sayfalar için Claude Vision'a düşer, ISO / ASME Y14.5 kurallarını uygular ve
+önceliklendirilmiş, işaretlenmiş bir rapor üretir.
+
+*A multi-agent auditor for 2D engineering drawings: vector-first parsing (DXF /
+PDF), Claude Vision fallback for scans, ISO / ASME rule checks, and a
+prioritised, marked-up report.*
+
+---
+
+## Neler bulur? / What it finds
+
+| Aile | Örnek bulgular |
+| --- | --- |
+| Ölçülendirme (`DIM001–DIM010`) | ölçülendirilmemiş delik, kapalı ölçü zinciri (aşırı ölçülendirme), **ölçü metni geometriyle uyuşmuyor**, eksik ⌀ sembolü, çerçeve dışı gösterim, üst üste binen ölçüler |
+| Tolerans (`TOL001–TOL005`) | toleranssız ölçü (genel tolerans notu yoksa majör), ters/sıfır tolerans aralığı, ondalık hane uyumsuzluğu, gerçekçi olmayan dar tolerans, karışık gösterim |
+| Geometrik tolerans (`GDT001–GDT010`) | tanımsız datum referansı, datumsuz diklik/konum toleransı, datumlu biçim toleransı, tekrarlanan datum, teorik ölçüsü olmayan konum toleransı |
+| Semboller (`SYM001–SYM005`) | değersiz yüzey sembolü, ölçüsüz kaynak sembolü, adımsız aralıklı kaynak, gerçekçi olmayan Ra |
+| Antet (`TB001–TB011`) | antet yok, zorunlu alan boş, "TBD" yer tutucusu, standart dışı ölçek, tarihsiz revizyon, çizen = onaylayan, izdüşüm yöntemi yok, birim yok, sayfa numarası tutarsız |
+| Tutarlılık (`CON001–CON006`) | karışık birimler, ölçek–geometri uyuşmazlığı, sayfalar arası resim no çakışması, görsel çıkarım yapılmadan okunamayan sayfa |
+
+Tam liste: `catia-diff rules --lang tr`
+
+## Kurulum / Install
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[all,dev]"       # veya: pip install -e ".[dxf,pdf,raster,report]"
+```
+
+Çekirdek yalnızca `pydantic` ister. İsteğe bağlı ekler:
+`dxf` (ezdxf) · `pdf` (PyMuPDF) · `raster` (Pillow, NumPy) · `cv` (OpenCV) ·
+`llm` (anthropic) · `report` (Jinja2). Eksik olan bir ek yalnızca ilgili yolu
+kapatır, programı durdurmaz.
+
+Claude Vision için kimlik: `export ANTHROPIC_API_KEY=...` (veya `ant auth login`).
+
+## Kullanım / Usage
+
+```bash
+# Örnek resmi üret (kasıtlı hatalarla) ve denetle
+python examples/generate_sample_drawing.py examples/sample_plate.dxf
+catia-diff audit examples/sample_plate.dxf --lang tr --out reports
+
+# Taranmış PDF: metin katmanı yoksa otomatik olarak Claude Vision devreye girer
+catia-diff audit tarama.pdf --vision auto --dpi 300
+
+# ASME profili, yalnızca kritik bulgular, CI için sert çıkış kodu
+catia-diff audit part.dxf --profile ASME --min-severity critical --fail-on critical
+
+# Kural seçimi
+catia-diff audit part.dxf --only DIM001,DIM003
+catia-diff audit part.dxf --disable TOL001 --category gdt,title_block
+```
+
+Çıkış kodları: `0` temiz · `1` `--fail-on` eşiğinde bulgu var · `2` dosya
+okunamadı.
+
+Üretilen dosyalar: `<ad>_audit.json`, `<ad>_audit.md`, `<ad>_audit.html`
+(filtrelenebilir kartlar, açık/koyu tema) ve sayfa başına
+`<ad>_sheetN_overlay.png` (bulgular numaralandırılmış kutularla işaretli).
+
+### Python API
+
+```python
+from catia_diff import AuditConfig, Profile, Severity, audit_file
+
+report = audit_file("part.dxf", AuditConfig(profile=Profile.ISO, language="tr"))
+print(report.summary_line("tr"))                    # Kritik: 3 | Majör: 12 …
+for finding in report.by_severity(Severity.CRITICAL):
+    print(finding.rule_id, finding.localized_message("tr"), finding.evidence.bbox)
+```
+
+## Girdi biçimleri / Input formats
+
+| Biçim | Yol | Ne elde edilir |
+| --- | --- | --- |
+| **DXF** | `ezdxf` | En yüksek doğruluk: ölçüler gerçek ölçülen değerle birlikte gelir, tolerans üstünü yazma (text override) tespit edilebilir, antet blok öznitelikleriyle okunur |
+| **PDF (vektörel)** | `PyMuPDF` | Metin aralıkları + vektör geometrisi; çoğu CAD çıktısı bu gruba girer |
+| **PDF (taranmış) / PNG, JPG, TIFF** | raster → Claude Vision | Sayfa temizlenir, döşenir, yapılandırılmış çıktı ile yazıya dökülür |
+| **DWG** | — | Kapalı biçim: önce DXF'e çevirin (`ODAFileConverter <in> <out> ACAD2018 DXF 0 1`) |
+
+> **Neden vektör öncelikli?** "Ölçü 25 yazıyor ama geometri 30" gibi en pahalı
+> hatalar yalnızca ölçünün gerçek değerinin bilindiği vektörel girdide
+> yakalanabilir. Raster yol tam bir yedektir, eşdeğeri değildir — bu yüzden
+> görsel çıkarım yapılmayan taranmış sayfa `CON005` ile ayrıca raporlanır.
+
+## Mimari / Architecture
+
+```
+Orchestrator
+ ├── Extraction Agent      DXF/PDF/raster → DrawingDocument (+ Claude Vision)
+ ├── Dimensioning Agent    DIM · TOL · GDT · SYM kuralları   ┐ paralel
+ ├── Title Block Agent     TB kuralları                      │ çalışır
+ ├── Consistency Agent     CON kuralları                     ┘
+ └── Report Agent          tekilleştir → önceliklendir → overlay + JSON/MD/HTML
+```
+
+Ayrıntılar, akış diyagramı, mesaj protokolü ve veri modeli:
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Yeni kural ekleme / Adding a rule
+
+```python
+# src/catia_diff/rules/dimensioning.py
+@register
+class MyRule(Rule):
+    meta = RuleMeta(
+        id="DIM011",
+        title="Chamfer without an angle",
+        title_tr="Açısı belirtilmemiş pah",
+        severity=Severity.MAJOR,
+        category=Category.DIMENSIONING,
+        standards=("ISO 129-1 §9",),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext):
+        for dim in target.dimensions:
+            if dim.kind is DimensionKind.CHAMFER and "°" not in dim.text:
+                yield self.finding(
+                    message=f"Chamfer {dim.id} has no angle.",
+                    message_tr=f"{dim.id} pahında açı belirtilmemiş.",
+                    sheet_index=target.index,
+                    bbox=dim.bbox,
+                    object_ids=[dim.id],
+                )
+```
+
+Kayıt otomatiktir; CLI, rapor ve testler kuralı hemen görür.
+
+## Geliştirme / Development
+
+```bash
+pytest -q                      # 147 test, isteğe bağlı bağımlılık yoksa atlanır
+pytest --cov=catia_diff        # ~%88 kapsam
+ruff check src tests examples
+```
+
+Testler ağ erişimi gerektirmez: Claude çağrıları `MockVisionModel` ve sahte bir
+istemci ile doğrulanır.
+
+## Sınırlar / Known limits
+
+* Görünüş (view) ayrıştırma etiket tabanlıdır; gerçek görünüş kümeleme yoktur —
+  bu nedenle "aynı unsur iki görünüşte farklı ölçülendirilmiş" denetimi henüz yok.
+* Unsur–ölçü eşleştirmesi ve kapalı zincir (raster yolda) sezgiseldir;
+  bulgular `confidence < 1.0` ile işaretlenir.
+* DWG doğrudan okunmaz; ISO 2768 sınıflarının sayısal değerleri henüz
+  uygulanmıyor (notun varlığı denetlenir, değerleri değil).

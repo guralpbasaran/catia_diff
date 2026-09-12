@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ t.title }} — {{ document_name }}</title>
+<style>
+  :root { color-scheme: light dark; --bg:#ffffff; --fg:#16191d; --muted:#5b6572; --line:#e3e6ea; --card:#f7f8fa; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171a; --fg:#e8eaed; --muted:#9aa4b2; --line:#2a2f36; --card:#1c2026; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px 64px; background:var(--bg); color:var(--fg);
+         font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size:1.6rem; margin:0 0 .3rem; }
+  h2 { font-size:1.15rem; margin:2rem 0 .6rem; }
+  .meta { color:var(--muted); font-size:.9rem; margin-bottom:1.2rem; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 1.2rem; }
+  .chip { border:0; border-radius:999px; padding:.35rem .8rem; color:#fff; font-size:.85rem;
+          cursor:pointer; opacity:.55; }
+  .chip[aria-pressed="true"] { opacity:1; }
+  .chip.neutral { background:#6b7280; }
+  .cards { display:grid; gap:12px; }
+  .card { border:1px solid var(--line); border-left-width:6px; border-radius:10px;
+          padding:12px 14px; background:var(--card); }
+  .card h3 { margin:0 0 .35rem; font-size:1rem; display:flex; gap:.5rem; align-items:baseline; flex-wrap:wrap; }
+  .rule { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.8rem; color:var(--muted); }
+  .badge { font-size:.72rem; padding:.1rem .5rem; border-radius:999px; color:#fff; }
+  .row { display:flex; flex-wrap:wrap; gap:1rem; color:var(--muted); font-size:.82rem; margin-top:.45rem; }
+  .fix { margin-top:.5rem; padding:.5rem .7rem; border-radius:8px; background:rgba(127,127,127,.12); font-size:.9rem; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; }
+  th, td { border-bottom:1px solid var(--line); padding:.45rem .6rem; text-align:left; }
+  img.sheet { width:100%; border:1px solid var(--line); border-radius:8px; margin-bottom:1rem; }
+  code { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.85em; }
+  details { margin-top:1rem; } summary { cursor:pointer; color:var(--muted); }
+  .empty { padding:2rem; text-align:center; border:1px dashed var(--line); border-radius:10px; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>{{ t.title }}</h1>
+  <div class="meta">
+    <strong>{{ document_name }}</strong> · {{ t.profile }}: {{ profile }} · {{ t.format }}:
+    <code>{{ source_format }}</code> · {{ t.rules }}: {{ rules_executed }} ·
+    {{ t.duration }}: {{ duration_ms }} ms · {{ t.generated }}: {{ generated_at }}
+  </div>
+
+  <div class="chips">
+    <button class="chip neutral" data-filter="all" aria-pressed="true">{{ t.filter_all }} ({{ total }})</button>
+    {% for item in counts %}
+    <button class="chip" data-filter="{{ item.key }}" aria-pressed="true"
+            style="background:{{ item.color }}">{{ item.label }} ({{ item.count }})</button>
+    {% endfor %}
+  </div>
+
+  {% if findings %}
+  <div class="cards" id="cards">
+    {% for f in findings %}
+    <article class="card" data-severity="{{ f.severity }}" style="border-left-color:{{ f.color }}">
+      <h3>
+        <span class="badge" style="background:{{ f.color }}">{{ f.severity_label }}</span>
+        <span>#{{ f.number }} {{ f.title }}</span>
+        <span class="rule">{{ f.rule_id }}{% if f.standards %} · {{ f.standards }}{% endif %}</span>
+      </h3>
+      <div>{{ f.message }}</div>
+      {% if f.suggestion %}<div class="fix">💡 {{ f.suggestion }}</div>{% endif %}
+      <div class="row">
+        <span>{{ t.sheet }} {{ f.sheet }}</span>
+        {% if f.objects %}<span><code>{{ f.objects }}</code></span>{% endif %}
+        <span>{{ f.category }}</span>
+        <span>{{ t.confidence }}: {{ f.confidence }}</span>
+        {% if f.snippet %}<span><code>{{ f.snippet }}</code></span>{% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">{{ t.no_findings }}</p>
+  {% endif %}
+
+  {% if overlays %}
+  <h2>{{ t.overlays }}</h2>
+  {% for overlay in overlays %}<img class="sheet" src="{{ overlay }}" alt="{{ overlay }}">{% endfor %}
+  {% endif %}
+
+  <h2>{{ t.extracted }}</h2>
+  <table>
+    <tbody>
+    {% for key, value in stats.items() %}<tr><th>{{ key }}</th><td>{{ value }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
+  {% if warnings %}
+  <details open>
+    <summary>{{ t.warnings }} ({{ warnings|length }})</summary>
+    <ul>{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+
+  {% if traces %}
+  <details>
+    <summary>{{ t.agents }}</summary>
+    <table>
+      <thead><tr><th>agent</th><th>status</th><th>findings</th><th>ms</th></tr></thead>
+      <tbody>
+      {% for trace in traces %}
+      <tr><td>{{ trace.agent }}</td><td>{{ trace.status }}</td>
+          <td>{{ trace.findings }}</td><td>{{ trace.duration_ms }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+</div>
+<script>
+  const chips = document.querySelectorAll('.chip');
+  const cards = document.querySelectorAll('#cards .card');
+  const active = new Set([...chips].map(c => c.dataset.filter).filter(f => f !== 'all'));
+  function apply() {
+    cards.forEach(card => { card.hidden = !active.has(card.dataset.severity); });
+  }
+  chips.forEach(chip => chip.addEventListener('click', () => {
+    const key = chip.dataset.filter;
+    if (key === 'all') {
+      const turnOn = chip.getAttribute('aria-pressed') === 'false';
+      chips.forEach(other => {
+        other.setAttribute('aria-pressed', String(turnOn));
+        if (other.dataset.filter !== 'all') {
+          turnOn ? active.add(other.dataset.filter) : active.delete(other.dataset.filter);
+        }
+      });
+    } else {
+      const on = chip.getAttribute('aria-pressed') === 'true';
+      chip.setAttribute('aria-pressed', String(!on));
+      on ? active.delete(key) : active.add(key);
+    }
+    apply();
+  }));
+  apply();
+</script>
+</body>
+</html>
