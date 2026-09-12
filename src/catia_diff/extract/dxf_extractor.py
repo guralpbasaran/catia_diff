@@ -465,6 +465,8 @@ def _measurement_interval(entity: Any, kind: DimensionKind) -> tuple[float, tupl
     makes exact chain analysis possible: two dimensions belong to the same
     chain when their intervals are adjacent on the same axis.
     """
+    if kind is DimensionKind.ORDINATE:
+        return _ordinate_interval(entity)
     if kind not in {DimensionKind.LINEAR, DimensionKind.ALIGNED}:
         return None
     try:
@@ -482,6 +484,27 @@ def _measurement_interval(entity: Any, kind: DimensionKind) -> tuple[float, tupl
     if math.isclose(start, end):
         return None
     return round(math.degrees(angle) % 180.0, 1), (min(start, end), max(start, end))
+
+
+#: Group code 70, bit 6: an ordinate dimension measures along X when set.
+_ORDINATE_X_FLAG = 64
+
+
+def _ordinate_interval(entity: Any) -> tuple[float, tuple[float, float]] | None:
+    """Ordinate dimensions measure from a common origin, so they behave like a
+    linear dimension whose first point is that origin."""
+    try:
+        origin = _point(entity.dxf.defpoint)
+        feature = _point(entity.dxf.defpoint2)
+    except Exception:
+        return None
+    along_x = bool(int(getattr(entity.dxf, "dimtype", 0) or 0) & _ORDINATE_X_FLAG)
+    axis = 0.0 if along_x else 90.0
+    start = origin.x if along_x else origin.y
+    end = feature.x if along_x else feature.y
+    if math.isclose(start, end):
+        return None
+    return axis, (min(start, end), max(start, end))
 
 
 def _dimstyle_values(entity: Any) -> dict[str, Any]:

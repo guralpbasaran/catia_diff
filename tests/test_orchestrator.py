@@ -24,6 +24,26 @@ def test_end_to_end_audit_of_the_sample_drawing(sample_dxf, config):
     assert {"TD-1001_sample_audit.json", "TD-1001_sample_audit.md", "TD-1001_sample_audit.html"} <= names
 
 
+def test_missing_dimension_is_found_end_to_end(sample_dxf, config):
+    """The sample plate's two lower holes carry no vertical locating dimension."""
+    report = Orchestrator(config).audit(sample_dxf)
+    unlocated = [f for f in report.findings if f.rule_id == "DIM011"]
+    assert len(unlocated) == 1
+    assert set(unlocated[0].evidence.object_ids) == {"FEAT0002", "FEAT0004"}
+    assert "Y" in unlocated[0].message
+    assert report.document_stats["views"] == 1
+
+
+def test_fully_dimensioned_drawing_raises_no_coverage_finding(sample_dxf_complete, config):
+    """The false-positive net: a complete drawing must stay silent."""
+    report = Orchestrator(config).audit(sample_dxf_complete)
+    coverage_rules = {"DIM011", "DIM012", "DIM013", "DIM014", "DIM015"}
+    assert [f.rule_id for f in report.findings if f.rule_id in coverage_rules] == []
+    # and the drawing as a whole is nearly clean
+    assert report.counts_by_severity()[Severity.CRITICAL] == 0
+    assert report.counts_by_severity()[Severity.MAJOR] == 0
+
+
 def test_iso2768_rules_fire_end_to_end(sample_dxf_iso2768, config):
     report = Orchestrator(config).audit(sample_dxf_iso2768)
     found = {finding.rule_id for finding in report.findings}

@@ -162,7 +162,22 @@ olduğu unsurun boyu) için **en geniş** genel tolerans seçilir; böylece
 
 Tabloların tamamı ve varsayımların gerekçesi: [`ISO2768.md`](ISO2768.md).
 
-## 6. Çok modlu çıkarım / Multimodal extraction
+## 6. Ölçülendirme kapsamı / Dimensional coverage
+
+`rules/views.py` sayfayı görünüşlere ayırır (mekânsal kümeleme, çıkarım aşamasında
+bir kez), `rules/constraints.py` her görünüş için eksen başına bir **kısıt grafiği**
+kurar: düğümler geometrinin ulaşılması gereken koordinatları, kenarlar ölçüler.
+
+```
+kapsayan ağaç        → tam ölçülendirilmiş
+bileşen − 1 kopukluk → o kadar eksik ölçü   (DIM011/DIM012)
+çevrim               → o kadar fazla ölçü   (DIM003/TOL010)
+```
+
+Analiz ölçülerin ölçtüğü aralığı gerektirir; DXF bunu verir, raster/vision yolu
+vermez ve kurallar o zaman hiç çalışmaz. Ayrıntı: [`DIMENSION_COVERAGE.md`](DIMENSION_COVERAGE.md).
+
+## 7. Çok modlu çıkarım / Multimodal extraction
 
 `llm/` katmanı arka uçtan bağımsızdır:
 
@@ -177,7 +192,7 @@ Tabloların tamamı ve varsayımların gerekçesi: [`ISO2768.md`](ISO2768.md).
 * Büyük sayfalar `extract/raster.py` ile döşenir (tile); OpenCV varsa gürültü
   temizleme + eğrilik düzeltme uygulanır, yoksa adım atlanır.
 
-## 7. Tasarım kararları / Design decisions
+## 8. Tasarım kararları / Design decisions
 
 | Karar | Gerekçe |
 | --- | --- |
@@ -189,3 +204,4 @@ Tabloların tamamı ve varsayımların gerekçesi: [`ISO2768.md`](ISO2768.md).
 | İsteğe bağlı bağımlılıklar | Çekirdek yalnızca pydantic ister; ezdxf/PyMuPDF/Pillow/anthropic yoksa ilgili yol kapanır, program çalışır. |
 | Standart tabloları ayrı paket | ISO 2768 verisi kural mantığından bağımsız; test edilebilir, genişletilebilir (ISO 286 aynı yere girer). |
 | Tanımsız yerde `None` | Standardın vermediği değer (silindiriklik, konum) uydurulmaz; kural sessiz kalır. |
+| Kapsam analizi kesin ya da yok | Aralık verisi olmadan tahmin yürütmek yerine kural hiç çalışmaz. |

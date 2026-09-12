@@ -18,7 +18,7 @@ from typing import ClassVar, Literal
 
 from catia_diff.config import AuditConfig, Profile
 from catia_diff.errors import RuleConfigurationError
-from catia_diff.extract.text_parsing import detect_general_tolerance
+from catia_diff.extract.text_parsing import detect_blanket_notes, detect_general_tolerance
 from catia_diff.models.drawing import DrawingDocument, Sheet
 from catia_diff.models.findings import Category, Evidence, Finding, Severity
 from catia_diff.models.geometry import BBox
@@ -49,6 +49,8 @@ class RuleContext:
         self.config = config
         self._general_tolerance: dict[int, str | None] = {}
         self._general_spec: dict[int, GeneralToleranceSpec | None] = {}
+        self._coverage: dict[int, list] = {}
+        self._blanket: dict[int, frozenset[str]] = {}
 
     # -- cached derivations -------------------------------------------------
     def general_tolerance(self, sheet: Sheet) -> str | None:
@@ -77,6 +79,24 @@ class RuleContext:
             )
             self._general_spec[sheet.index] = spec
         return self._general_spec[sheet.index]
+
+    def coverage(self, sheet: Sheet):
+        """Constraint-graph coverage per view, computed once per sheet.
+
+        Empty when the source carries no measured intervals (PDF, vision): the
+        analysis is exact or it does not run.
+        """
+        if sheet.index not in self._coverage:
+            from catia_diff.rules.constraints import sheet_coverage
+
+            self._coverage[sheet.index] = sheet_coverage(sheet, self.config)
+        return self._coverage[sheet.index]
+
+    def blanket_notes(self, sheet: Sheet) -> frozenset[str]:
+        """Categories a blanket note already covers ("ALL FILLETS R3")."""
+        if sheet.index not in self._blanket:
+            self._blanket[sheet.index] = detect_blanket_notes(sheet.notes_text())
+        return self._blanket[sheet.index]
 
     def governing_length_mm(self, sheet: Sheet) -> float | None:
         """Largest linear size on the sheet, in mm.

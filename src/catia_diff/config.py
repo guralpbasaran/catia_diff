@@ -70,6 +70,16 @@ class AuditConfig(BaseModel):
     duplicate_iou_threshold: float = 0.6
     undimensioned_feature_limit: int = 15
 
+    # Dimensional coverage analysis (missing dimensions)
+    #: Gap below which two geometry clusters count as one view, as a fraction
+    #: of the sheet's larger side.
+    view_gap_ratio: float = 0.06
+    #: Coordinates closer than this fraction of the view size are one reference.
+    node_merge_ratio: float = 1e-3
+    #: Strict mode treats every contour vertex as a position that must be
+    #: dimensioned; the default only uses feature centres, extents and steps.
+    strict_dimensioning: bool = False
+
     vision: VisionConfig = Field(default_factory=VisionConfig)
     parallel_agents: bool = True
     verbose: bool = False

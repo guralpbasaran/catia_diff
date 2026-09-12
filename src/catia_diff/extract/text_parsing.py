@@ -661,3 +661,56 @@ def detect_units_note(text: str | None) -> Units | None:
     if "INCH" in blob:
         return Units.INCH
     return Units.MM
+
+
+# --------------------------------------------------------------------------
+# Blanket notes
+# --------------------------------------------------------------------------
+#: Categories a blanket note can cover.
+BLANKET_RADII = "radii"
+BLANKET_CHAMFERS = "chamfers"
+BLANKET_GENERAL = "general"
+
+_BLANKET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        BLANKET_RADII,
+        re.compile(
+            r"(?:T[ÜU]M|B[ÜU]T[ÜU]N|BEL[İI]RT[İI]LMEYEN|ALL|UNSPECIFIED|UNMARKED)\s+"
+            r"(?:RADY[ÜU]S|YAR[İI][ÇC]AP|RADI[İI]|RADII|RADIUS(?:ES)?|FILLETS?|KÖ[ŞS]E)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        BLANKET_CHAMFERS,
+        re.compile(
+            r"(?:T[ÜU]M|B[ÜU]T[ÜU]N|BEL[İI]RT[İI]LMEYEN|ALL|UNSPECIFIED)\s+(?:PAH|CHAMFERS?)"
+            r"|BREAK\s+(?:ALL\s+)?(?:SHARP\s+)?EDGES"
+            r"|KESK[İI]N\s+K[ÖO][ŞS]ELER",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        BLANKET_GENERAL,
+        re.compile(
+            r"UNLESS\s+OTHERWISE\s+(?:SPECIFIED|STATED|NOTED)"
+            r"|AKS[İI]\s+BEL[İI]RT[İI]LMED[İI][ĞG][İI]\s+(?:S[ÜU]RECE|DURUMDA|TAKD[İI]RDE)"
+            r"|BEL[İI]RT[İI]LMED[İI][ĞG][İI]\s+S[ÜU]RECE",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+
+def detect_blanket_notes(text: str | None) -> frozenset[str]:
+    """Categories covered by blanket notes such as "ALL FILLETS R3".
+
+    A drawing may legitimately leave individual callouts off when a note
+    already covers them; the checkers use this to stay quiet instead of
+    reporting a defect the draughtsman deliberately avoided.
+    """
+    if not text:
+        return frozenset()
+    normalized = normalize_drawing_text(text)
+    return frozenset(
+        category for category, pattern in _BLANKET_PATTERNS if pattern.search(normalized)
+    )

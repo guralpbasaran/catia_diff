@@ -348,6 +348,13 @@ class View(DrawingObject):
     scale: float | None = None
     is_section: bool = False
     is_detail: bool = False
+    #: ids of the objects that belong to this view (filled by view segmentation)
+    member_ids: list[str] = Field(default_factory=list)
+
+    @property
+    def is_geometric(self) -> bool:
+        """True when the view came from geometry clustering, not from a caption."""
+        return bool(self.member_ids)
 
 
 class TitleBlockField(BaseModel):
@@ -470,6 +477,10 @@ class Sheet(BaseModel):
     def find_object(self, object_id: str) -> DrawingObject | None:
         return next((obj for obj in self.objects() if obj.id == object_id), None)
 
+    def objects_of_view(self, view_id: str) -> list[DrawingObject]:
+        """Every object assigned to ``view_id`` (see :mod:`catia_diff.rules.views`)."""
+        return [obj for obj in self.objects() if obj.view_id == view_id]
+
     def feature_by_id(self, feature_id: str) -> GeometryFeature | None:
         return next((f for f in self.features if f.id == feature_id), None)
 
@@ -536,4 +547,5 @@ class DrawingDocument(BaseModel):
                 for feature in sheet.features
                 if feature.kind not in {GeometryKind.CIRCLE, GeometryKind.ARC}
             ),
+            "views": sum(1 for sheet in self.sheets for view in sheet.views if view.is_geometric),
         }

@@ -153,6 +153,14 @@ def sample_dxf(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def sample_dxf_complete(tmp_path_factory) -> Path:
+    """The same plate, dimensioned so nothing is missing - the false-positive net."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_complete.dxf"
+    _sample_builder()(complete=True).saveas(target)
+    return target
+
+
+@pytest.fixture(scope="session")
 def sample_dxf_iso2768(tmp_path_factory) -> Path:
     """The same drawing plus an ISO 2768-mK note and the defects it exposes."""
     target = tmp_path_factory.mktemp("drawings") / "TD-1001_2768.dxf"

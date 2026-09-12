@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from catia_diff.models.drawing import DimensionKind, GeometryKind, Sheet
+from catia_diff.extract.text_parsing import BLANKET_RADII
+from catia_diff.models.drawing import (
+    DimensionKind,
+    GDTCharacteristic,
+    GeometryFeature,
+    GeometryKind,
+    Sheet,
+    View,
+)
 from catia_diff.models.findings import Category, Finding, Severity
 from catia_diff.rules import analysis
 from catia_diff.rules.base import Rule, RuleContext, RuleMeta, register
+from catia_diff.rules.constraints import AxisCoverage, ReferenceNode
 
 AGENT = "dimensioning"
 
@@ -26,6 +35,9 @@ class UndimensionedFeatureRule(Rule):
 
     def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
         _, undimensioned = analysis.associate_features(target)
+        if BLANKET_RADII in ctx.blanket_notes(target):
+            # "ALL FILLETS R3" covers exactly these callouts.
+            undimensioned = [f for f in undimensioned if f.kind is not GeometryKind.ARC]
         limit = ctx.config.undimensioned_feature_limit
         for feature in undimensioned[:limit]:
             size = (feature.radius or 0.0) * 2.0
@@ -396,3 +408,341 @@ class RadiusDiameterMismatchRule(Rule):
             confidence=0.7,
             agent=AGENT,
         )
+
+
+# --------------------------------------------------------------------------
+# Dimensional coverage: positions the drawing does not let you derive
+# --------------------------------------------------------------------------
+def _feature(sheet: Sheet, feature_id: str) -> GeometryFeature | None:
+    return sheet.feature_by_id(feature_id)
+
+
+def _position_controlled(sheet: Sheet, view: View) -> bool:
+    """True when GD&T locates the features of this view instead of dimensions.
+
+    A hole placed by basic dimensions plus a position frame is located - by a
+    different mechanism, but located; reporting it as free would be wrong.
+    """
+    members = set(view.member_ids)
+    has_position = any(
+        gtol.characteristic is GDTCharacteristic.POSITION
+        for gtol in sheet.geometric_tolerances
+        if gtol.id in members or gtol.view_id == view.id
+    )
+    has_basic = any(dim.is_basic for dim in sheet.dimensions if dim.id in members)
+    return has_position and has_basic
+
+
+def _pattern_located(sheet: Sheet, view: View, features: list[GeometryFeature]) -> bool:
+    """True when a pattern note ("4x ⌀6.5 EQUALLY SPACED") places the features."""
+    if not features:
+        return False
+    members = set(view.member_ids)
+    for dim in sheet.dimensions:
+        if dim.id not in members:
+            continue
+        multiplicity = int(dim.extra.get("multiplicity", 1) or 1)
+        if multiplicity < len(features):
+            continue
+        text = dim.text.upper()
+        if "EŞİT" in text or "ESIT" in text or "EQUALLY" in text or "SPACED" in text:
+            return True
+    return False
+
+
+def _node_features(sheet: Sheet, nodes: list[ReferenceNode]) -> list[GeometryFeature]:
+    out: list[GeometryFeature] = []
+    for node in nodes:
+        for feature_id in node.feature_ids:
+            feature = _feature(sheet, feature_id)
+            if feature is not None and feature.center is not None:
+                out.append(feature)
+    return out
+
+
+def _describe_feature(feature: GeometryFeature) -> str:
+    if feature.radius:
+        return f"⌀{feature.radius * 2:g}"
+    return feature.kind.value
+
+
+@register
+class UnlocatedFeatureRule(Rule):
+    meta = RuleMeta(
+        id="DIM011",
+        title="Feature is not located",
+        title_tr="Unsurun konumu belirlenmemiş",
+        severity=Severity.MAJOR,
+        category=Category.DIMENSIONING,
+        standards=("ISO 129-1 §4.1", "ASME Y14.5-2018 §1.4(b)"),
+        description=(
+            "A hole may carry its size and still be unbuildable: no dimension chain "
+            "reaches its centre along one of the axes."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        for view, axes in ctx.coverage(target):
+            if _position_controlled(target, view):
+                continue
+            for coverage in axes:
+                for group in coverage.unconstrained:
+                    features = _node_features(target, group)
+                    if not features or _pattern_located(target, view, features):
+                        continue
+                    yield self._finding(target, view, coverage, group, features)
+
+    def _finding(self, sheet, view, coverage: AxisCoverage, group, features) -> Finding:
+        names = ", ".join(feature.id for feature in features)
+        sizes = ", ".join(sorted({_describe_feature(f) for f in features}))
+        position = ", ".join(
+            f"({f.center.x:.1f}, {f.center.y:.1f})" for f in features[:3] if f.center
+        )
+        box = features[0].bbox
+        for feature in features[1:]:
+            if feature.bbox and box:
+                box = box.union(feature.bbox)
+        return self.finding(
+            message=(
+                f"{sizes} at {position} is not located along {coverage.label}: no dimension "
+                f"reaches coordinate {group[0].coordinate:g} from the rest of the view."
+            ),
+            message_tr=(
+                f"{position} konumundaki {sizes} unsuru {coverage.label} ekseninde "
+                f"konumlandırılmamış: {group[0].coordinate:g} koordinatına hiçbir ölçü ulaşmıyor."
+            ),
+            suggestion=(
+                f"Add a {coverage.label} dimension from a datum edge (or an existing dimension) "
+                "to this feature."
+            ),
+            suggestion_tr=(
+                f"Bu unsura, bir referans kenardan (veya mevcut bir ölçüden) {coverage.label} "
+                "ekseninde ölçü ekleyin."
+            ),
+            sheet_index=sheet.index,
+            bbox=box,
+            object_ids=[feature.id for feature in features],
+            snippet=names,
+            confidence=0.9,
+            agent=AGENT,
+        )
+
+
+@register
+class UnconstrainedGeometryRule(Rule):
+    meta = RuleMeta(
+        id="DIM012",
+        title="Geometry is not tied into the dimension chain",
+        title_tr="Geometri ölçü zincirine bağlanmamış",
+        severity=Severity.MAJOR,
+        category=Category.DIMENSIONING,
+        standards=("ISO 129-1 §6", "ASME Y14.5-2018 §1.4"),
+        description="A coordinate no dimension reaches cannot be manufactured to.",
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        for view, axes in ctx.coverage(target):
+            for coverage in axes:
+                for group in coverage.unconstrained:
+                    if _node_features(target, group):
+                        continue  # DIM011 names the feature instead
+                    coordinates = ", ".join(f"{node.coordinate:g}" for node in group[:4])
+                    yield self.finding(
+                        message=(
+                            f"View {view.label or view.id}: coordinate(s) {coordinates} are not "
+                            f"connected to the rest of the drawing along {coverage.label}; "
+                            f"{coverage.missing} dimension(s) are missing."
+                        ),
+                        message_tr=(
+                            f"{view.label or view.id} görünüşü: {coordinates} koordinat(lar)ı "
+                            f"{coverage.label} ekseninde resmin geri kalanına bağlı değil; "
+                            f"{coverage.missing} ölçü eksik."
+                        ),
+                        suggestion="Dimension this geometry from an existing reference.",
+                        suggestion_tr="Bu geometriyi mevcut bir referanstan ölçülendirin.",
+                        sheet_index=target.index,
+                        bbox=view.bbox,
+                        object_ids=[
+                            feature_id for node in group for feature_id in node.feature_ids
+                        ][:10],
+                        confidence=0.8,
+                        agent=AGENT,
+                    )
+
+
+@register
+class ViewWithoutDimensionsRule(Rule):
+    meta = RuleMeta(
+        id="DIM013",
+        title="View carries no dimensions at all",
+        title_tr="Görünüşte hiç ölçü yok",
+        severity=Severity.CRITICAL,
+        category=Category.DIMENSIONING,
+        standards=("ISO 129-1 §4.1",),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        if not ctx.coverage(target):
+            return
+        for view in target.views:
+            if not view.is_geometric:
+                continue
+            members = set(view.member_ids)
+            if any(dim.id in members for dim in target.dimensions):
+                continue
+            features = [f for f in target.features if f.id in members]
+            if len(features) < 2:
+                continue  # a stray symbol is not a view
+            yield self.finding(
+                message=(
+                    f"View {view.label or view.id} contains {len(features)} geometric entities "
+                    "but not a single dimension."
+                ),
+                message_tr=(
+                    f"{view.label or view.id} görünüşünde {len(features)} geometri nesnesi var "
+                    "ancak tek bir ölçü bile yok."
+                ),
+                suggestion=(
+                    "Dimension the view, or mark it as a reference/illustrative view if it is "
+                    "intentionally undimensioned."
+                ),
+                suggestion_tr=(
+                    "Görünüşü ölçülendirin; bilinçli olarak ölçüsüz bırakıldıysa referans/"
+                    "açıklayıcı görünüş olarak işaretleyin."
+                ),
+                sheet_index=target.index,
+                bbox=view.bbox,
+                object_ids=[view.id],
+                agent=AGENT,
+            )
+
+
+@register
+class MissingOverallSizeRule(Rule):
+    meta = RuleMeta(
+        id="DIM014",
+        title="Overall size not dimensioned",
+        title_tr="Toplam ölçü verilmemiş",
+        severity=Severity.MINOR,
+        category=Category.DIMENSIONING,
+        standards=("ISO 129-1 §6.3",),
+        description=(
+            "Even a fully chained view should state its overall size so stock and "
+            "inspection do not have to add the chain up."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        for view, axes in ctx.coverage(target):
+            members = set(view.member_ids)
+            for coverage in axes:
+                extent = coverage.extent
+                if extent is None or not coverage.is_complete() or len(coverage.nodes) < 3:
+                    continue
+                span = extent[1] - extent[0]
+                if span <= 0:
+                    continue
+                tolerance = max(span * 1e-3, 1e-9)
+                spanned = any(
+                    _spans(dim.extra.get("interval"), extent, tolerance)
+                    for dim in target.dimensions
+                    if dim.id in members and _same_axis(dim, coverage.axis)
+                )
+                if spanned:
+                    continue
+                yield self.finding(
+                    message=(
+                        f"View {view.label or view.id} has no overall {coverage.label} dimension "
+                        f"({span:g} across the whole view)."
+                    ),
+                    message_tr=(
+                        f"{view.label or view.id} görünüşünde toplam {coverage.label} ölçüsü yok "
+                        f"(görünüş boyunca {span:g})."
+                    ),
+                    suggestion=f"Add the overall {coverage.label} dimension, as an auxiliary one if needed.",
+                    suggestion_tr=f"Toplam {coverage.label} ölçüsünü, gerekirse yardımcı ölçü olarak ekleyin.",
+                    sheet_index=target.index,
+                    bbox=view.bbox,
+                    object_ids=[view.id],
+                    confidence=0.8,
+                    agent=AGENT,
+                )
+
+
+def _same_axis(dim, axis: float) -> bool:
+    value = dim.extra.get("axis")
+    return value is not None and abs(float(value) % 180.0 - axis) <= 0.5
+
+
+def _spans(interval, extent: tuple[float, float], tolerance: float) -> bool:
+    if not interval or len(interval) != 2:
+        return False
+    low, high = min(interval), max(interval)
+    return abs(low - extent[0]) <= tolerance and abs(high - extent[1]) <= tolerance
+
+
+@register
+class ObliqueEdgeWithoutAngleRule(Rule):
+    meta = RuleMeta(
+        id="DIM015",
+        title="Oblique edge without an angular dimension",
+        title_tr="Açısı verilmemiş eğik kenar",
+        severity=Severity.MINOR,
+        category=Category.DIMENSIONING,
+        standards=("ISO 129-1 §9", "ASME Y14.5-2018 §3.3.4"),
+        description=(
+            "A slanted edge is defined by its angle or by coordinates; when the drawing "
+            "states neither, the angle can only be back-calculated."
+        ),
+    )
+    #: Only edges longer than this fraction of the view are worth an angle.
+    MIN_LENGTH_RATIO = 0.10
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        import math
+
+        for view, axes in ctx.coverage(target):
+            members = set(view.member_ids)
+            dims = [dim for dim in target.dimensions if dim.id in members]
+            if any(dim.is_angular for dim in dims):
+                continue
+            oblique_axes = {round(cov.axis, 1) for cov in axes} - {0.0, 90.0}
+            view_size = max(view.bbox.width, view.bbox.height) if view.bbox else 0.0
+            if view_size <= 0:
+                continue
+
+            longest: tuple[float, float, str] | None = None  # (length, angle, feature id)
+            for feature in target.features:
+                if feature.id not in members or not feature.points:
+                    continue
+                for start, end in zip(feature.points, feature.points[1:], strict=False):
+                    length = math.hypot(end.x - start.x, end.y - start.y)
+                    if length < view_size * self.MIN_LENGTH_RATIO:
+                        continue
+                    angle = math.degrees(math.atan2(end.y - start.y, end.x - start.x)) % 180.0
+                    if min(angle, abs(angle - 90.0), abs(angle - 180.0)) <= 1.0:
+                        continue  # axis-parallel
+                    if any(abs(angle - axis) <= 1.0 for axis in oblique_axes):
+                        continue  # measured along its own direction
+                    if longest is None or length > longest[0]:
+                        longest = (length, angle, feature.id)
+            if longest is None:
+                continue
+            _, angle, feature_id = longest
+            yield self.finding(
+                message=(
+                    f"View {view.label or view.id} has a {angle:.1f}° edge but no angular "
+                    "dimension; the angle has to be calculated from the geometry."
+                ),
+                message_tr=(
+                    f"{view.label or view.id} görünüşünde {angle:.1f}°'lik bir kenar var ancak "
+                    "açı ölçüsü yok; açı geometriden hesaplanmak zorunda."
+                ),
+                suggestion="State the angle, or locate both endpoints with coordinate dimensions.",
+                suggestion_tr="Açıyı belirtin ya da iki uç noktayı koordinat ölçüleriyle konumlandırın.",
+                sheet_index=target.index,
+                bbox=target.feature_by_id(feature_id).bbox if target.feature_by_id(feature_id) else view.bbox,
+                object_ids=[feature_id],
+                confidence=0.6,
+                agent=AGENT,
+            )
