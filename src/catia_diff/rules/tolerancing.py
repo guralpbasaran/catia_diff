@@ -534,7 +534,8 @@ class ToleranceStackRule(Rule):
         if not chains:
             return
         spec = ctx.general_spec(target)
-        for overall, parts in chains:
+        for cycle in chains:
+            overall, parts = cycle.overall, cycle.parts
             overall_width = _effective_width(overall, spec)
             part_widths = [_effective_width(part, spec) for part in parts]
             if overall_width is None or any(width is None for width in part_widths):
@@ -565,8 +566,8 @@ class ToleranceStackRule(Rule):
                 ),
                 sheet_index=target.index,
                 bbox=overall.bbox,
-                object_ids=[overall.id, *(part.id for part in parts)],
-                confidence=0.8,
+                object_ids=[dim.id for dim in cycle.dimensions],
+                confidence=min(0.8, cycle.confidence),
                 agent=AGENT,
             )
 

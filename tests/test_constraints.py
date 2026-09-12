@@ -167,3 +167,41 @@ def test_sheet_coverage_per_view():
     assert view.is_geometric
     labels = {cov.label: cov.missing for cov in axes}
     assert labels["X"] == 1  # the hole centre is unreached
+
+
+# ------------------------------------------------------------------ cycles
+def test_dimension_cycles_need_no_geometry():
+    """Over-dimensioning is a property of the dimension set alone."""
+    from catia_diff.rules.constraints import dimension_cycles
+
+    chain = [
+        linear("D1", 12, 0.0, (0, 12)),
+        linear("D2", 68, 0.0, (12, 80)),
+        linear("D3", 80, 0.0, (0, 80)),
+    ]
+    cycles = dimension_cycles(chain)
+    assert len(cycles) == 1
+    cycle = cycles[0]
+    assert cycle.closing.id == "D3"
+    assert {dim.id for dim in cycle.dimensions} == {"D1", "D2", "D3"}
+    assert cycle.overall.id == "D3"
+    assert {dim.id for dim in cycle.parts} == {"D1", "D2"}
+    assert cycle.exact and cycle.label == "X"
+
+
+def test_dimension_cycles_are_silent_on_a_tree():
+    from catia_diff.rules.constraints import dimension_cycles
+
+    assert dimension_cycles([linear("D1", 12, 0.0, (0, 12)), linear("D2", 68, 0.0, (12, 80))]) == []
+
+
+def test_coverage_reports_the_cycle_detail():
+    features = [outline(), make_circle("F1", x=12, y=10)]
+    dims = [
+        linear("D1", 12, 0.0, (0, 12)),
+        linear("D2", 68, 0.0, (12, 80)),
+        linear("D3", 80, 0.0, (0, 80)),
+    ]
+    coverage = build_axis_coverage(features, dims, 0.0, 0.01)
+    assert coverage.cycles == 1
+    assert coverage.redundant[0].closing.id == "D3"

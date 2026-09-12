@@ -111,6 +111,26 @@ birleşir.
 | `DIM013` | Kritik | Görünüşte hiç ölçü yok |
 | `DIM014` | Minör | Toplam ölçü verilmemiş (zincir tam olsa bile) |
 | `DIM015` | Minör | Eğik kenarın açısı verilmemiş |
+| `DIM003` | Majör | **Fazla ölçü** — grafikte çevrim; kapatan kenar fazla olan ölçüdür |
+| `TOL010` | Majör | Çevrimdeki tolerans birikimi toplam ölçüye sığmıyor |
+
+`DIM003` ve `TOL010` aynı motoru kullanır: bir kenar, uçları zaten bağlı olan iki
+düğümü birleştiriyorsa çevrim kapanır ve **o kenar fazladır**. Grafik çevrimin
+hangi ölçülerden geçtiğini de verdiği için bulgu, fazla olan ölçüyü adıyla söyler:
+
+```
+X ekseninde 80.00 ölçüsü fazla: 12.00 + 56.00 + 12.00 zaten aynı mesafeyi belirliyor.
+```
+
+İki uzunluğundaki çevrim, aynı aralığın ikinci kez ölçülmesidir ve ayrı ifade edilir:
+
+```
+Y ekseninde 40.00 ölçüsü DIM0010 ile aynı mesafeyi ölçüyor; ölçü tekrar edilmiş.
+```
+
+Bu ikinci durum, eski bitişik-zincir sezgiselinin **göremediği** bir kusurdu: o yol
+"küçük ölçülerin toplamı büyük ölçüye eşit mi" diye bakıyordu, iki uzunluğunda
+çevrim ise toplam içermez.
 
 ## 6. Sessiz kalması gereken durumlar
 
@@ -130,8 +150,10 @@ Kurallar aşağıdaki hâllerde bulgu üretmez — her biri testlidir:
 
 1. **Vektör-önce.** Analiz, her ölçünün ölçtüğü aralığı bilmeyi gerektirir. DXF bunu
    verir (`_measurement_interval`, ordinate ölçüler dâhil). PDF metin katmanında ve
-   görsel çıkarımda bu veri yoktur; kurallar o zaman **hiç çalışmaz** (sessizce yanlış
-   sonuç üretmek yerine). Sayfanın neden denetlenemediğini `CON005` bildirir.
+   görsel çıkarımda bu veri yoktur; **eksik** ölçü kuralları o zaman hiç çalışmaz
+   (sessizce yanlış sonuç üretmek yerine) ve `CON005` durumu bildirir.
+   `DIM003`/`TOL010` ise bu kaynaklarda daha zayıf bir yola düşer: aynı hizadaki
+   gösterimlerin toplamını karşılaştırır ve bulguyu `%60` güvenle işaretler.
 2. **Çap/yarıçap/açı ölçüleri** boyutu kısıtlar, konumu değil; grafiğe girmezler.
    Boyut kapsamını `DIM001`/`DIM005` denetler.
 3. **Simetri** yalnızca eksen çizgisi çizilmişse anlaşılır; "ortada" ima edilen ama

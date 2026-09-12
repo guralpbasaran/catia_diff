@@ -61,6 +61,113 @@ class ReferenceNode:
         return f"{self.coordinate:g}"
 
 
+@dataclass(frozen=True)
+class DimensionCycle:
+    """A set of dimensions that constrain the same distance twice.
+
+    Every edge that closes a cycle in the constraint graph is exactly one
+    redundant dimension: the drawing can reach both of its endpoints already,
+    so the value it states must agree with the rest by construction.
+    """
+
+    axis: float
+    dimensions: tuple[Dimension, ...]
+    closing: Dimension
+    exact: bool = True
+
+    @property
+    def overall(self) -> Dimension:
+        """The widest dimension of the cycle - the one a chain adds up to."""
+        return max(self.dimensions, key=_dimension_span)
+
+    @property
+    def parts(self) -> tuple[Dimension, ...]:
+        overall = self.overall
+        return tuple(dim for dim in self.dimensions if dim is not overall)
+
+    @property
+    def label(self) -> str:
+        return axis_label(self.axis)
+
+    @property
+    def confidence(self) -> float:
+        return 0.95 if self.exact else 0.6
+
+
+def _dimension_span(dim: Dimension) -> float:
+    interval = dim.extra.get("interval")
+    if interval and len(interval) == 2:
+        return abs(float(interval[1]) - float(interval[0]))
+    return abs(dim.nominal or 0.0)
+
+
+class _Graph:
+    """Union-find over reference coordinates that also remembers its tree.
+
+    Keeping the spanning forest lets a cycle be reported as the dimensions it
+    actually runs through, instead of only as a count.
+    """
+
+    def __init__(self, tolerance: float) -> None:
+        self.tolerance = tolerance
+        self.nodes: list[ReferenceNode] = []
+        self._parent: list[int] = []
+        self._tree: dict[int, list[tuple[int, Dimension]]] = {}
+
+    def add_node(self, node: ReferenceNode) -> int:
+        self.nodes.append(node)
+        self._parent.append(len(self._parent))
+        return len(self.nodes) - 1
+
+    def index_of(self, value: float, *, kind: str = "dimension") -> int:
+        for index, node in enumerate(self.nodes):
+            if abs(node.coordinate - value) <= self.tolerance:
+                return index
+        return self.add_node(
+            ReferenceNode(coordinate=value, feature_ids=(), kinds=frozenset({kind}))
+        )
+
+    def find(self, item: int) -> int:
+        while self._parent[item] != item:
+            self._parent[item] = self._parent[self._parent[item]]
+            item = self._parent[item]
+        return item
+
+    def add_edge(self, first: int, second: int, dim: Dimension, axis: float) -> DimensionCycle | None:
+        """Link two coordinates; returns the cycle when the edge closes one."""
+        root_a, root_b = self.find(first), self.find(second)
+        if root_a != root_b:
+            self._parent[root_a] = root_b
+            self._tree.setdefault(first, []).append((second, dim))
+            self._tree.setdefault(second, []).append((first, dim))
+            return None
+        path = self._path(first, second)
+        return DimensionCycle(
+            axis=axis, dimensions=(*path, dim), closing=dim, exact=True
+        )
+
+    def _path(self, start: int, goal: int) -> tuple[Dimension, ...]:
+        """Dimensions along the existing route between two connected nodes."""
+        queue: list[tuple[int, tuple[Dimension, ...]]] = [(start, ())]
+        seen = {start}
+        while queue:
+            node, dims = queue.pop(0)
+            if node == goal:
+                return dims
+            for neighbour, dim in self._tree.get(node, ()):
+                if neighbour in seen:
+                    continue
+                seen.add(neighbour)
+                queue.append((neighbour, (*dims, dim)))
+        return ()
+
+    def components(self) -> list[list[int]]:
+        groups: dict[int, list[int]] = {}
+        for index in range(len(self.nodes)):
+            groups.setdefault(self.find(index), []).append(index)
+        return sorted(groups.values(), key=len, reverse=True)
+
+
 @dataclass
 class AxisCoverage:
     """Constraint graph of one view along one axis."""
@@ -68,9 +175,14 @@ class AxisCoverage:
     axis: float
     nodes: list[ReferenceNode] = field(default_factory=list)
     edge_count: int = 0
-    cycles: int = 0
+    #: the redundant dimensions: one entry per cycle-closing edge
+    redundant: list[DimensionCycle] = field(default_factory=list)
     #: node indices grouped per connected component, largest component first
     components: list[list[int]] = field(default_factory=list)
+
+    @property
+    def cycles(self) -> int:
+        return len(self.redundant)
 
     @property
     def missing(self) -> int:
@@ -206,21 +318,28 @@ def build_axis_coverage(
     strict: bool = False,
 ) -> AxisCoverage:
     """Constraint graph of one view along ``axis``."""
-    nodes = reference_nodes(features, axis, tolerance, strict=strict)
-    coverage = AxisCoverage(axis=axis, nodes=nodes)
+    graph = _Graph(tolerance)
+    for node in reference_nodes(features, axis, tolerance, strict=strict):
+        graph.add_node(node)
 
-    def node_index(value: float) -> int:
-        for index, node in enumerate(coverage.nodes):
-            if abs(node.coordinate - value) <= tolerance:
-                return index
+    coverage = AxisCoverage(axis=axis, nodes=graph.nodes)
+    for dim, low, high in _axis_edges(dimensions, axis):
         # A dimension may reference something the geometry does not expose
         # (a centre line we did not capture); it is still a real reference.
-        coverage.nodes.append(
-            ReferenceNode(coordinate=value, feature_ids=(), kinds=frozenset({"dimension"}))
-        )
-        return len(coverage.nodes) - 1
+        cycle = graph.add_edge(graph.index_of(low), graph.index_of(high), dim, axis)
+        coverage.edge_count += 1
+        if cycle is not None:
+            coverage.redundant.append(cycle)
+    coverage.nodes = graph.nodes
+    coverage.components = graph.components()
+    return coverage
 
-    edges: list[tuple[int, int]] = []
+
+def _axis_edges(
+    dimensions: Iterable[Dimension], axis: float
+) -> list[tuple[Dimension, float, float]]:
+    """Dimensions that measure along ``axis``, as (dimension, start, end)."""
+    edges: list[tuple[Dimension, float, float]] = []
     for dim in dimensions:
         interval = dim.extra.get("interval")
         dim_axis = dim.extra.get("axis")
@@ -230,29 +349,34 @@ def build_axis_coverage(
             continue
         if dim.is_reference:
             continue  # auxiliary dimensions constrain nothing
-        edges.append((node_index(float(interval[0])), node_index(float(interval[1]))))
+        low, high = float(interval[0]), float(interval[1])
+        edges.append((dim, min(low, high), max(low, high)))
+    return edges
 
-    parent = list(range(len(coverage.nodes)))
 
-    def find(item: int) -> int:
-        while parent[item] != item:
-            parent[item] = parent[parent[item]]
-            item = parent[item]
-        return item
+def dimension_cycles(
+    dimensions: Sequence[Dimension], *, relative_tolerance: float = 1e-3
+) -> list[DimensionCycle]:
+    """Redundant dimensions, found from the dimensions alone.
 
-    for first, second in edges:
-        coverage.edge_count += 1
-        root_a, root_b = find(first), find(second)
-        if root_a == root_b:
-            coverage.cycles += 1
-        else:
-            parent[root_a] = root_b
-
-    groups: dict[int, list[int]] = {}
-    for index in range(len(coverage.nodes)):
-        groups.setdefault(find(index), []).append(index)
-    coverage.components = sorted(groups.values(), key=len, reverse=True)
-    return coverage
+    Over-dimensioning is a property of the dimension set: it needs no geometry
+    and no view segmentation, only the interval each dimension measures.  That
+    makes this usable wherever the source records intervals, even on a sheet
+    whose geometry was not captured.
+    """
+    cycles: list[DimensionCycle] = []
+    for axis in view_axes(dimensions):
+        edges = _axis_edges(dimensions, axis)
+        if len(edges) < 2:
+            continue
+        values = [value for _, low, high in edges for value in (low, high)]
+        span = max(values) - min(values)
+        graph = _Graph(max(span * relative_tolerance, 1e-9))
+        for dim, low, high in edges:
+            cycle = graph.add_edge(graph.index_of(low), graph.index_of(high), dim, axis)
+            if cycle is not None:
+                cycles.append(cycle)
+    return cycles
 
 
 def view_coverage(

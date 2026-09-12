@@ -23,6 +23,12 @@ Defect                      Expected rule
 12 + 56 + 12 = 80 chain     TOL010 stack ±0.7 against an overall ±0.3
 flatness 0.8                GDT011 looser than the ISO 2768-K general flatness
 ==========================  ======================================================
+
+The two tolerance demos above dimension a span the base drawing already
+dimensions, so the variant is over-dimensioned as well: the constraint graph
+reports both duplicates as ``DIM003`` (redundant dimension). That is deliberate -
+it shows the graph catching a redundancy the old contiguous-chain heuristic
+could not see, because a duplicate is a cycle of length two.
 Defect                      Expected rule
 ==========================  ======================================================
 hole D4 never dimensioned   DIM001 undimensioned feature

@@ -115,21 +115,41 @@ class ClosedChainRule(Rule):
         severity=Severity.MAJOR,
         category=Category.DIMENSIONING,
         standards=("ISO 129-1 §6.4", "ASME Y14.5-2018 §1.4(m)"),
-        description="A chain plus its overall dimension over-constrains the part.",
+        description=(
+            "A chain plus its overall dimension over-constrains the part: in the "
+            "constraint graph that is a cycle, and every cycle is one dimension too many."
+        ),
     )
 
     def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
-        for overall, parts in analysis.find_closed_chains(target):
-            part_labels = " + ".join(dim.label() for dim in parts)
+        for cycle in analysis.find_closed_chains(target):
+            overall, parts = cycle.overall, cycle.parts
+            where = f" along {cycle.label}" if cycle.exact else ""
+            where_tr = f"{cycle.label} ekseninde " if cycle.exact else ""
+            if len(parts) == 1:
+                # A cycle of length two is the same distance measured twice.
+                twin = parts[0]
+                message = (
+                    f"{overall.label()} duplicates {twin.id}{where}: both dimension the "
+                    "same distance."
+                )
+                message_tr = (
+                    f"{where_tr}{overall.label()} ölçüsü {twin.id} ile aynı mesafeyi "
+                    "ölçüyor; ölçü tekrar edilmiş."
+                )
+            else:
+                part_labels = " + ".join(dim.label() for dim in parts)
+                message = (
+                    f"{overall.label()} is redundant{where}: {part_labels} already fixes the "
+                    "same distance, so the drawing constrains it twice."
+                )
+                message_tr = (
+                    f"{where_tr}{overall.label()} ölçüsü fazla: {part_labels} zaten aynı "
+                    "mesafeyi belirliyor, yani resim bu mesafeyi iki kez kısıtlıyor."
+                )
             yield self.finding(
-                message=(
-                    f"Closed chain: {part_labels} equals the overall dimension "
-                    f"{overall.label()}. The same distance is dimensioned twice."
-                ),
-                message_tr=(
-                    f"Kapalı zincir: {part_labels} toplamı, toplam ölçü {overall.label()} "
-                    f"değerine eşit. Aynı mesafe iki kez ölçülendirilmiş."
-                ),
+                message=message,
+                message_tr=message_tr,
                 suggestion=(
                     "Remove one dimension of the chain or show it as auxiliary/reference, "
                     "so tolerances do not accumulate against a fixed overall size."
@@ -140,8 +160,8 @@ class ClosedChainRule(Rule):
                 ),
                 sheet_index=target.index,
                 bbox=overall.bbox,
-                object_ids=[overall.id, *(dim.id for dim in parts)],
-                confidence=0.6,
+                object_ids=[dim.id for dim in cycle.dimensions],
+                confidence=cycle.confidence,
                 agent=AGENT,
             )
 

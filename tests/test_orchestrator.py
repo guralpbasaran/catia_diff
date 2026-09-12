@@ -49,8 +49,9 @@ def test_iso2768_rules_fire_end_to_end(sample_dxf_iso2768, config):
     found = {finding.rule_id for finding in report.findings}
     assert {"TOL007", "TOL008", "TOL009", "TOL010", "GDT011"} <= found
 
-    stack = next(f for f in report.findings if f.rule_id == "TOL010")
-    assert "±0.7" in stack.message and "±0.3" in stack.message
+    stacks = [f for f in report.findings if f.rule_id == "TOL010"]
+    chain_stack = next(f for f in stacks if "12.00 + 56.00 + 12.00" in f.message)
+    assert "±0.7" in chain_stack.message and "±0.3" in chain_stack.message
     looser = next(f for f in report.findings if f.rule_id == "TOL008")
     assert "ISO 2768-mK" in looser.message
 
