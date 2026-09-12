@@ -492,7 +492,7 @@ class UnlocatedFeatureRule(Rule):
         id="DIM011",
         title="Feature is not located",
         title_tr="Unsurun konumu belirlenmemiş",
-        severity=Severity.MAJOR,
+        severity=Severity.CRITICAL,
         category=Category.DIMENSIONING,
         standards=("ISO 129-1 §4.1", "ASME Y14.5-2018 §1.4(b)"),
         description=(

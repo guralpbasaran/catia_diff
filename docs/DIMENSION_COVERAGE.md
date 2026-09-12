@@ -58,8 +58,8 @@ Y ekseni: düğümler {0, 10, 30, 40} · kenarlar 0-40, 0-30
 Üretilen bulgu:
 
 ```
-MAJÖR DIM011 (12.0, 10.0), (68.0, 10.0) konumundaki ⌀6.5 unsuru Y ekseninde
-             konumlandırılmamış: 10 koordinatına hiçbir ölçü ulaşmıyor.
+KRITIK DIM011 (12.0, 10.0), (68.0, 10.0) konumundaki ⌀6.5 unsuru Y ekseninde
+              konumlandırılmamış: 10 koordinatına hiçbir ölçü ulaşmıyor.
 ```
 
 `--complete` varyantı aynı levhayı kapsayan ağaç olacak şekilde ölçülendirir ve
@@ -106,13 +106,17 @@ birleşir.
 
 | Kural | Önem | Ne der |
 | --- | --- | --- |
-| `DIM011` | Majör | Unsurun konumu belirlenmemiş — serbest düğümde bir delik/yay merkezi var |
+| `DIM011` | **Kritik** | Unsurun konumu belirlenmemiş — serbest düğümde bir delik/yay merkezi var |
 | `DIM012` | Majör | Geometri ölçü zincirine bağlanmamış — serbest düğümde unsur yok, düz koordinat |
 | `DIM013` | Kritik | Görünüşte hiç ölçü yok |
 | `DIM014` | Minör | Toplam ölçü verilmemiş (zincir tam olsa bile) |
 | `DIM015` | Minör | Eğik kenarın açısı verilmemiş |
 | `DIM003` | Majör | **Fazla ölçü** — grafikte çevrim; kapatan kenar fazla olan ölçüdür |
 | `TOL010` | Majör | Çevrimdeki tolerans birikimi toplam ölçüye sığmıyor |
+
+`DIM011` neden **Kritik**: konumu türetilemeyen bir delik, çapı doğru verilmiş olsa
+bile parçayı imal edilemez kılar — atölye deliği nereye açacağını bilemez. Bu, "eksik
+bilgi" değil "yanlış parça" sınıfına giren bir kusurdur.
 
 `DIM003` ve `TOL010` aynı motoru kullanır: bir kenar, uçları zaten bağlı olan iki
 düğümü birleştiriyorsa çevrim kapanır ve **o kenar fazladır**. Grafik çevrimin

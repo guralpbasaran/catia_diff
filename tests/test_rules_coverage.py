@@ -70,7 +70,8 @@ def test_dim011_reports_a_hole_that_is_not_located():
     findings = run("DIM011", sheet)
     assert len(findings) == 1
     finding = findings[0]
-    assert finding.severity is Severity.MAJOR
+    # a feature whose position cannot be derived makes the part unbuildable
+    assert finding.severity is Severity.CRITICAL
     assert "F1" in finding.evidence.object_ids
     assert "Y" in finding.message
 

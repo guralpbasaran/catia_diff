@@ -41,8 +41,8 @@ bir **kapsayan ağaçtır**:
 konumlandırılmamış:
 
 ```
-MAJÖR DIM011  (12.0, 10.0), (68.0, 10.0) konumundaki ⌀6.5 unsuru Y ekseninde
-              konumlandırılmamış: 10 koordinatına hiçbir ölçü ulaşmıyor.
+KRITIK DIM011  (12.0, 10.0), (68.0, 10.0) konumundaki ⌀6.5 unsuru Y ekseninde
+               konumlandırılmamış: 10 koordinatına hiçbir ölçü ulaşmıyor.
 ```
 
 GD&T konum toleransı, `4x ⌀6.5 EŞİT BÖLÜNMÜŞ` patern notu, blanket notlar
@@ -169,7 +169,7 @@ Ayrıntılar, akış diyagramı, mesaj protokolü ve veri modeli:
 @register
 class MyRule(Rule):
     meta = RuleMeta(
-        id="DIM011",
+        id="DIM016",
         title="Chamfer without an angle",
         title_tr="Açısı belirtilmemiş pah",
         severity=Severity.MAJOR,
