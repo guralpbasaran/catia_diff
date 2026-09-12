@@ -1,3 +1,4 @@
+import pytest
 from conftest import (
     box,
     make_circle,
@@ -65,7 +66,59 @@ def test_dim003_ignores_an_open_chain():
     assert run("DIM003", make_sheet(dimensions=dims)) == []
 
 
+def test_dim003_names_the_redundant_dimension():
+    chain = [
+        make_dimension("DIM1", nominal=12.0, extra={"axis": 0.0, "interval": [0.0, 12.0]}),
+        make_dimension("DIM2", nominal=68.0, extra={"axis": 0.0, "interval": [12.0, 80.0]}),
+        make_dimension("DIM3", nominal=80.0, extra={"axis": 0.0, "interval": [0.0, 80.0]}),
+    ]
+    finding = run("DIM003", make_sheet(dimensions=chain))[0]
+    assert "80" in finding.message  # the overall is the redundant one
+    assert "12 + 68" in finding.message or "68 + 12" in finding.message
+    assert "X" in finding.message
+    assert finding.confidence > 0.9  # exact, not heuristic
+
+
+def test_dim003_detects_a_duplicated_span():
+    """Two dimensions over the same distance are a cycle of length two.
+
+    The old contiguous-chain heuristic could not see this: it looked for a run
+    of smaller dimensions adding up to a larger one.
+    """
+    duplicated = [
+        make_dimension("DIM1", nominal=40.0, extra={"axis": 90.0, "interval": [0.0, 40.0]}),
+        make_dimension("DIM2", nominal=40.0, extra={"axis": 90.0, "interval": [0.0, 40.0]}),
+    ]
+    findings = run("DIM003", make_sheet(dimensions=duplicated))
+    assert len(findings) == 1
+    assert set(findings[0].evidence.object_ids) == {"DIM1", "DIM2"}
+    assert "Y" in findings[0].message
+    # a two-cycle is phrased as a duplicate and names its twin
+    assert "duplicates DIM" in findings[0].message
+    assert any(name in findings[0].localized_message("tr") for name in ("DIM1", "DIM2"))
+
+
+def test_dim003_counts_one_finding_per_redundant_dimension():
+    dims = [
+        make_dimension("DIM1", nominal=12.0, extra={"axis": 0.0, "interval": [0.0, 12.0]}),
+        make_dimension("DIM2", nominal=68.0, extra={"axis": 0.0, "interval": [12.0, 80.0]}),
+        make_dimension("DIM3", nominal=80.0, extra={"axis": 0.0, "interval": [0.0, 80.0]}),
+        make_dimension("DIM4", nominal=80.0, extra={"axis": 0.0, "interval": [0.0, 80.0]}),
+    ]
+    assert len(run("DIM003", make_sheet(dimensions=dims))) == 2
+
+
+def test_dim003_separates_axes():
+    """A horizontal and a vertical dimension over the same numbers are not a cycle."""
+    dims = [
+        make_dimension("DIM1", nominal=40.0, extra={"axis": 0.0, "interval": [0.0, 40.0]}),
+        make_dimension("DIM2", nominal=40.0, extra={"axis": 90.0, "interval": [0.0, 40.0]}),
+    ]
+    assert run("DIM003", make_sheet(dimensions=dims)) == []
+
+
 def test_dim003_falls_back_to_collinear_clusters_without_intervals():
+    """PDF and vision input carry no intervals; the weaker path still reports."""
     dims = [
         make_dimension("DIM1", nominal=10.0, bbox=box(0, 0)),
         make_dimension("DIM2", nominal=15.0, bbox=box(20, 0)),
@@ -73,7 +126,8 @@ def test_dim003_falls_back_to_collinear_clusters_without_intervals():
     ]
     findings = run("DIM003", make_sheet(dimensions=dims))
     assert len(findings) == 1
-    assert findings[0].confidence < 1.0
+    assert findings[0].confidence == pytest.approx(0.6)  # marked inexact
+    assert set(findings[0].evidence.object_ids) == {"DIM1", "DIM2", "DIM3"}
 
 
 def test_dim004_flags_a_text_override():

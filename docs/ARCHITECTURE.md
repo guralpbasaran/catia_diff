@@ -133,7 +133,51 @@ Sezgisel geometri yardımcıları `rules/analysis.py` içindedir: unsur–ölç�
 eşleştirmesi, kapalı zincir tespiti (vektörel girdide ölçü aralıklarıyla
 **kesin**, diğerlerinde küme sezgiseliyle), çakışan gösterim tespiti.
 
-## 5. Çok modlu çıkarım / Multimodal extraction
+## 5. Standart tabloları / Standards tables
+
+`catia_diff.standards.iso2768` ISO 2768'i **veri** olarak tutar: aralık
+anlamları ("30 üstü, 120 dâhil") bozulmadan tablolar, sınıf harfleri
+(`f m c v` / `H K L`) ve standardın tanımlamadığı yerler için `None`.
+
+```
+"GENEL TOLERANSLAR ISO 2768-mK"
+        │ parse_designation
+        ▼
+GeneralToleranceSpec(standard="ISO 2768", linear=m, geometric=K)
+        │ deviation_for(dim)              │ geometric_limit_mm(char, size)
+        ▼                                 ▼
+   ±0.3 mm (56 mm, tablo 1)          0.2 mm (düzlemsellik, 80 mm, sınıf K)
+```
+
+Kural tarafı bunları `RuleContext.general_spec(sheet)` üzerinden alır; `TOL006`
+notun okunabilirliğini, `TOL007` kapsamı, `TOL008`/`TOL009` yazılı toleransla
+karşılaştırmayı, `TOL010` zincir birikimini ve `GDT011` geometrik karşılaştırmayı
+denetler. Türetilmiş kurallar (yuvarlaklık ≤ dairesel salgı, paralellik =
+maks(boyut toleransı, düzlemsellik)) standardın metnindeki tanımları izler.
+
+Birimler: tablolar mm'dir; inç çizimlerde değer mm'ye çevrilir, sonuç geri
+dönüştürülür. Bilinmeyen boyut bilgisi (açının kısa kenarı, çerçevenin ait
+olduğu unsurun boyu) için **en geniş** genel tolerans seçilir; böylece
+"yazılı tolerans genel toleranstan geniş mi" sorusu yanlış pozitif üretmez.
+
+Tabloların tamamı ve varsayımların gerekçesi: [`ISO2768.md`](ISO2768.md).
+
+## 6. Ölçülendirme kapsamı / Dimensional coverage
+
+`rules/views.py` sayfayı görünüşlere ayırır (mekânsal kümeleme, çıkarım aşamasında
+bir kez), `rules/constraints.py` her görünüş için eksen başına bir **kısıt grafiği**
+kurar: düğümler geometrinin ulaşılması gereken koordinatları, kenarlar ölçüler.
+
+```
+kapsayan ağaç        → tam ölçülendirilmiş
+bileşen − 1 kopukluk → o kadar eksik ölçü   (DIM011/DIM012)
+çevrim               → o kadar fazla ölçü   (DIM003/TOL010)
+```
+
+Analiz ölçülerin ölçtüğü aralığı gerektirir; DXF bunu verir, raster/vision yolu
+vermez ve kurallar o zaman hiç çalışmaz. Ayrıntı: [`DIMENSION_COVERAGE.md`](DIMENSION_COVERAGE.md).
+
+## 7. Çok modlu çıkarım / Multimodal extraction
 
 `llm/` katmanı arka uçtan bağımsızdır:
 
@@ -148,7 +192,7 @@ eşleştirmesi, kapalı zincir tespiti (vektörel girdide ölçü aralıklarıyl
 * Büyük sayfalar `extract/raster.py` ile döşenir (tile); OpenCV varsa gürültü
   temizleme + eğrilik düzeltme uygulanır, yoksa adım atlanır.
 
-## 6. Tasarım kararları / Design decisions
+## 8. Tasarım kararları / Design decisions
 
 | Karar | Gerekçe |
 | --- | --- |
@@ -158,3 +202,6 @@ eşleştirmesi, kapalı zincir tespiti (vektörel girdide ölçü aralıklarıyl
 | Ajan başına hata kapsaması | Bir ajanın çökmesi "temiz rapor" üretmemeli. |
 | `confidence` alanı | Sezgisel kural ile kesin kural aynı listede ama ayırt edilebilir. |
 | İsteğe bağlı bağımlılıklar | Çekirdek yalnızca pydantic ister; ezdxf/PyMuPDF/Pillow/anthropic yoksa ilgili yol kapanır, program çalışır. |
+| Standart tabloları ayrı paket | ISO 2768 verisi kural mantığından bağımsız; test edilebilir, genişletilebilir (ISO 286 aynı yere girer). |
+| Tanımsız yerde `None` | Standardın vermediği değer (silindiriklik, konum) uydurulmaz; kural sessiz kalır. |
+| Kapsam analizi kesin ya da yok | Aralık verisi olmadan tahmin yürütmek yerine kural hiç çalışmaz. |

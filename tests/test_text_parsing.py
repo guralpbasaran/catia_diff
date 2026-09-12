@@ -150,3 +150,18 @@ def test_notes_classification():
     assert classify_annotation("THIRD ANGLE PROJECTION") == "projection"
     assert detect_units_note("ALL DIMENSIONS IN MM") is Units.MM
     assert detect_units_note("ÖLÇÜLER MM CİNSİNDENDİR") is Units.MM
+
+
+def test_surface_marker_must_stand_alone():
+    """Regression: 'TOLERANSLAR' contains 'RA' but is not a roughness callout."""
+    assert parse_surface_finish("GENEL TOLERANSLAR ISO 2768-mK") is None
+    assert parse_surface_finish("GENERAL TOLERANCES") is None
+    assert parse_surface_finish("RA6.3").ra == 6.3
+    assert parse_surface_finish("Rz 12,5").rz == 12.5
+
+
+def test_weld_size_must_be_written_against_the_letter():
+    """Regression: 'DETAIL A 2:1' is a view caption, not an a2 weld."""
+    assert parse_weld_symbol("DETAIL A 2:1") is None
+    assert parse_weld_symbol("SECTION A-A") is None
+    assert parse_weld_symbol("z6").size == 6.0

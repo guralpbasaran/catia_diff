@@ -15,14 +15,64 @@ prioritised, marked-up report.*
 
 | Aile | Örnek bulgular |
 | --- | --- |
-| Ölçülendirme (`DIM001–DIM010`) | ölçülendirilmemiş delik, kapalı ölçü zinciri (aşırı ölçülendirme), **ölçü metni geometriyle uyuşmuyor**, eksik ⌀ sembolü, çerçeve dışı gösterim, üst üste binen ölçüler |
-| Tolerans (`TOL001–TOL005`) | toleranssız ölçü (genel tolerans notu yoksa majör), ters/sıfır tolerans aralığı, ondalık hane uyumsuzluğu, gerçekçi olmayan dar tolerans, karışık gösterim |
-| Geometrik tolerans (`GDT001–GDT010`) | tanımsız datum referansı, datumsuz diklik/konum toleransı, datumlu biçim toleransı, tekrarlanan datum, teorik ölçüsü olmayan konum toleransı |
+| Ölçülendirme (`DIM001–DIM015`) | **konumu belirlenmemiş delik**, ölçü zincirine bağlanmamış geometri, ölçüsüz görünüş, ölçülendirilmemiş delik, kapalı ölçü zinciri (aşırı ölçülendirme), **ölçü metni geometriyle uyuşmuyor**, eksik ⌀ sembolü, toplam ölçü yok, açısı verilmemiş eğik kenar |
+| Tolerans (`TOL001–TOL010`) | toleranssız ölçü (genel tolerans notu yoksa majör), ters/sıfır tolerans aralığı, ondalık hane uyumsuzluğu, gerçekçi olmayan dar tolerans, karışık gösterim, **ISO 2768 sayısal denetimleri** (aşağıya bakın) |
+| Geometrik tolerans (`GDT001–GDT011`) | tanımsız datum referansı, datumsuz diklik/konum toleransı, datumlu biçim toleransı, tekrarlanan datum, teorik ölçüsü olmayan konum toleransı, genel geometrik toleranstan geniş çerçeve |
 | Semboller (`SYM001–SYM005`) | değersiz yüzey sembolü, ölçüsüz kaynak sembolü, adımsız aralıklı kaynak, gerçekçi olmayan Ra |
 | Antet (`TB001–TB011`) | antet yok, zorunlu alan boş, "TBD" yer tutucusu, standart dışı ölçek, tarihsiz revizyon, çizen = onaylayan, izdüşüm yöntemi yok, birim yok, sayfa numarası tutarsız |
 | Tutarlılık (`CON001–CON006`) | karışık birimler, ölçek–geometri uyuşmazlığı, sayfalar arası resim no çakışması, görsel çıkarım yapılmadan okunamayan sayfa |
 
-Tam liste: `catia-diff rules --lang tr`
+Tam liste: `catia-diff rules --lang tr` (58 kural)
+
+### Eksik ölçülendirme sayısal olarak
+
+Uygulama "her deliğin çapı var mı" diye bakmakla yetinmez; **konumun türetilebilir
+olup olmadığını** denetler. Her görünüşte, her eksende geometrinin referans
+koordinatları düğüm, ölçüler kenardır; tam ölçülendirilmiş bir görünüş bu grafikte
+bir **kapsayan ağaçtır**:
+
+| Grafik | Anlamı |
+| --- | --- |
+| Bağlantılı, çevrimsiz | Tam ölçülendirilmiş |
+| `bileşen − 1` kopukluk | O kadar **eksik ölçü** (`DIM011`, `DIM012`) |
+| `çevrim` sayısı | O kadar **fazla ölçü** (`DIM003`, `TOL010`) |
+
+Örnek resimdeki gerçek kusur — dört delikten ikisi düşey eksende hiç
+konumlandırılmamış:
+
+```
+KRITIK DIM011  (12.0, 10.0), (68.0, 10.0) konumundaki ⌀6.5 unsuru Y ekseninde
+               konumlandırılmamış: 10 koordinatına hiçbir ölçü ulaşmıyor.
+```
+
+GD&T konum toleransı, `4x ⌀6.5 EŞİT BÖLÜNMÜŞ` patern notu, blanket notlar
+(`TÜM RADYÜSLER R3`) ve referans ölçüler ayrıca ele alınır — ayrıntılar ve sınırlar:
+[`docs/DIMENSION_COVERAGE.md`](docs/DIMENSION_COVERAGE.md).
+
+### ISO 2768 sayısal olarak
+
+`ISO 2768-mK` gibi bir genel tolerans notu, tablolarıyla birlikte
+`catia_diff.standards.iso2768` içinde veridir; not okunduğu anda her ölçü için
+izin verilen sapma sayıya dönüşür:
+
+| Kural | Ne denetler | Örnek bulgu |
+| --- | --- | --- |
+| `TOL006` | Notun sınıf harfi var mı, geçerli mi | "ISO 2768" — sınıf belirtilmemiş, sayı türetilemiyor |
+| `TOL007` | Nominal ölçü tablonun kapsamında mı | 0,3 mm ölçü: tablo 0,5 mm'den başlıyor → sapma ölçünün üzerinde yazılmalı |
+| `TOL008` | Yazılı tolerans genel toleranstan geniş mi | 40 mm'de ±1,5; `ISO 2768-m` ±0,3 veriyor |
+| `TOL009` | Yazılı tolerans genel toleransın aynısı mı | 56 mm'de ±0,3 — gereksiz tekrar |
+| `TOL010` | Kapalı zincirde tolerans birikimi toplam ölçüye sığıyor mu | 12+56+12 zinciri ±0,7 biriktiriyor, toplam ölçü ±0,3 veriyor |
+| `GDT011` | Çerçeve, ISO 2768-2 genel geometrik toleransından geniş mi | Düzlemsellik 0,8; sınıf K 80 mm için 0,2 veriyor |
+
+Tablolar ISO 2768-1 (boyut/açı, sınıf f·m·c·v) ve ISO 2768-2 (düzlemsellik–
+doğrusallık, diklik, simetri, dairesel salgı; sınıf H·K·L) ile türetilmiş
+kuralları (yuvarlaklık ≤ salgı, paralellik = maks(boyut toleransı, düzlemsellik))
+içerir. Standardın tanımlamadığı yerler (silindiriklik, konum, açısallık, profil)
+`None` döner ve kural sessiz kalır — tahmin üretilmez. `in` biriminde çizilmiş
+resimlerde değerler mm'ye çevrilip geri dönüştürülür.
+
+Tabloların tamamı, kural eşlemesi, varsayımlar ve Python API'si:
+[`docs/ISO2768.md`](docs/ISO2768.md).
 
 ## Kurulum / Install
 
@@ -44,6 +94,14 @@ Claude Vision için kimlik: `export ANTHROPIC_API_KEY=...` (veya `ant auth login
 # Örnek resmi üret (kasıtlı hatalarla) ve denetle
 python examples/generate_sample_drawing.py examples/sample_plate.dxf
 catia-diff audit examples/sample_plate.dxf --lang tr --out reports
+
+# ISO 2768-mK notlu varyant: sayısal genel tolerans denetimlerini tetikler
+python examples/generate_sample_drawing.py examples/sample_2768.dxf --iso2768
+catia-diff audit examples/sample_2768.dxf --lang tr --out reports
+
+# Tam ölçülendirilmiş varyant: kapsam kuralları hiç bulgu üretmemeli
+python examples/generate_sample_drawing.py examples/sample_ok.dxf --complete
+catia-diff audit examples/sample_ok.dxf --lang tr --out reports
 
 # Taranmış PDF: metin katmanı yoksa otomatik olarak Claude Vision devreye girer
 catia-diff audit tarama.pdf --vision auto --dpi 300
@@ -100,7 +158,9 @@ Orchestrator
 ```
 
 Ayrıntılar, akış diyagramı, mesaj protokolü ve veri modeli:
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · ISO 2768 sayısal referansı:
+[`docs/ISO2768.md`](docs/ISO2768.md) · eksik ölçülendirme modeli:
+[`docs/DIMENSION_COVERAGE.md`](docs/DIMENSION_COVERAGE.md).
 
 ## Yeni kural ekleme / Adding a rule
 
@@ -109,7 +169,7 @@ Ayrıntılar, akış diyagramı, mesaj protokolü ve veri modeli:
 @register
 class MyRule(Rule):
     meta = RuleMeta(
-        id="DIM011",
+        id="DIM016",
         title="Chamfer without an angle",
         title_tr="Açısı belirtilmemiş pah",
         severity=Severity.MAJOR,
@@ -134,8 +194,8 @@ Kayıt otomatiktir; CLI, rapor ve testler kuralı hemen görür.
 ## Geliştirme / Development
 
 ```bash
-pytest -q                      # 147 test, isteğe bağlı bağımlılık yoksa atlanır
-pytest --cov=catia_diff        # ~%88 kapsam
+pytest -q                      # 251 test, isteğe bağlı bağımlılık yoksa atlanır
+pytest --cov=catia_diff        # ~%89 kapsam
 ruff check src tests examples
 ```
 
@@ -144,9 +204,17 @@ istemci ile doğrulanır.
 
 ## Sınırlar / Known limits
 
-* Görünüş (view) ayrıştırma etiket tabanlıdır; gerçek görünüş kümeleme yoktur —
-  bu nedenle "aynı unsur iki görünüşte farklı ölçülendirilmiş" denetimi henüz yok.
+* Görünüşler mekânsal kümelemeyle ayrıştırılır, ancak görünüşler **arası** ilişki
+  kurulmaz: "aynı unsur iki görünüşte farklı ölçülendirilmiş" denetimi henüz yok.
+* Eksik ölçülendirme analizi **vektör-önce**dir: her ölçünün ölçtüğü aralığı
+  bilmeyi gerektirir. DXF bunu verir; PDF metin katmanında ve görsel çıkarımda
+  kurallar sessizce çalışmaz (yanlış sonuç üretmek yerine) ve `CON005` durumu bildirir.
 * Unsur–ölçü eşleştirmesi ve kapalı zincir (raster yolda) sezgiseldir;
   bulgular `confidence < 1.0` ile işaretlenir.
-* DWG doğrudan okunmaz; ISO 2768 sınıflarının sayısal değerleri henüz
-  uygulanmıyor (notun varlığı denetlenir, değerleri değil).
+* DWG doğrudan okunmaz.
+* ISO 286 geçme sınıfları (H7, g6) sayısal olarak çözülmez; bu toleranslar
+  "bilinmiyor" sayılır ve sayısal karşılaştırmalara girmez.
+* ISO 2768-1 açı tablosu açının kısa kenarına göre indekslidir; 2B gösterim bunu
+  vermediği için en geniş satır (en güvenli varsayım) kullanılır. Aynı şekilde
+  ISO 2768-2 denetimi, çerçevenin ait olduğu unsurun boyu yerine sayfadaki en
+  büyük ölçüyü alır — yanlış pozitif yerine eksik rapor tarafında kalır.

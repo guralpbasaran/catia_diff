@@ -136,16 +136,35 @@ def config(tmp_path) -> AuditConfig:
     )
 
 
-@pytest.fixture(scope="session")
-def sample_dxf(tmp_path_factory) -> Path:
-    """The example drawing with its deliberate defects."""
-    ezdxf = pytest.importorskip("ezdxf")
+def _sample_builder():
+    pytest.importorskip("ezdxf")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
     from generate_sample_drawing import build  # noqa: PLC0415
 
-    assert ezdxf  # the generator needs it
+    return build
+
+
+@pytest.fixture(scope="session")
+def sample_dxf(tmp_path_factory) -> Path:
+    """The example drawing with its deliberate defects."""
     target = tmp_path_factory.mktemp("drawings") / "TD-1001_sample.dxf"
-    build().saveas(target)
+    _sample_builder()().saveas(target)
+    return target
+
+
+@pytest.fixture(scope="session")
+def sample_dxf_complete(tmp_path_factory) -> Path:
+    """The same plate, dimensioned so nothing is missing - the false-positive net."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_complete.dxf"
+    _sample_builder()(complete=True).saveas(target)
+    return target
+
+
+@pytest.fixture(scope="session")
+def sample_dxf_iso2768(tmp_path_factory) -> Path:
+    """The same drawing plus an ISO 2768-mK note and the defects it exposes."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_2768.dxf"
+    _sample_builder()(with_general_tolerance=True).saveas(target)
     return target
 
 

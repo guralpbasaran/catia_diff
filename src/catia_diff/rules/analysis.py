@@ -9,7 +9,6 @@ findings built on it can carry an honest confidence value.
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from collections.abc import Iterable
 
 from catia_diff.models.drawing import (
@@ -18,7 +17,9 @@ from catia_diff.models.drawing import (
     GeometryFeature,
     GeometryKind,
     Sheet,
+    ToleranceKind,
 )
+from catia_diff.rules.constraints import DimensionCycle, dimension_cycles
 
 #: Layers whose circles are construction geometry rather than real features.
 _NON_FEATURE_LAYER_RE = re.compile(
@@ -140,76 +141,30 @@ def collinear_clusters(dims: Iterable[Dimension], axis: str) -> list[list[Dimens
 
 def find_closed_chains(
     sheet: Sheet, *, relative_tolerance: float = 2e-3
-) -> list[tuple[Dimension, list[Dimension]]]:
-    """Detect closed dimension chains (over-dimensioning).
+) -> list[DimensionCycle]:
+    """Redundant dimensions on ``sheet`` (over-dimensioning).
 
-    A chain is closed when an overall dimension is fully covered by a
-    contiguous run of smaller dimensions on the same axis: the drawing then
-    constrains the same distance twice, which ISO 129-1 and ASME Y14.5 both
-    forbid because the tolerances accumulate against a fixed overall size.
+    A drawing over-dimensions when it fixes the same distance twice.  In the
+    constraint graph of :mod:`catia_diff.rules.constraints` that is exactly a
+    cycle, so vector sources are analysed there - the result names the
+    dimensions the cycle runs through, not just their count.
 
-    Vector sources (DXF) expose each dimension's measured interval, so the
-    chain is found exactly.  For sources that do not (PDF text, vision), the
-    weaker fallback below compares sums within a collinear group of callouts.
+    Sources without measured intervals (PDF text, vision) cannot be analysed
+    that way; for them the weaker fallback below compares sums within a group
+    of collinear callouts and marks its findings as inexact.
     """
     dims = linear_dimensions(sheet)
-    exact = _interval_chains(dims, relative_tolerance)
-    if exact:
-        return exact
     if any(dim.extra.get("interval") for dim in dims):
-        return []  # intervals were available and proved there is no chain
+        return dimension_cycles(dims, relative_tolerance=relative_tolerance)
     return _cluster_chains(dims, relative_tolerance)
-
-
-def _axis_intervals(dims: Iterable[Dimension]) -> dict[float, list[tuple[Dimension, float, float]]]:
-    groups: dict[float, list[tuple[Dimension, float, float]]] = defaultdict(list)
-    for dim in dims:
-        interval = dim.extra.get("interval")
-        axis = dim.extra.get("axis")
-        if not interval or axis is None or len(interval) != 2:
-            continue
-        start, end = float(interval[0]), float(interval[1])
-        groups[round(float(axis), 1)].append((dim, min(start, end), max(start, end)))
-    return groups
-
-
-def _interval_chains(
-    dims: Iterable[Dimension], relative_tolerance: float
-) -> list[tuple[Dimension, list[Dimension]]]:
-    chains: list[tuple[Dimension, list[Dimension]]] = []
-    for items in _axis_intervals(dims).values():
-        for overall, low, high in items:
-            span = high - low
-            if span <= 0:
-                continue
-            slack = max(span * relative_tolerance, 1e-9)
-            inner = [
-                (dim, start, end)
-                for dim, start, end in items
-                if dim is not overall
-                and start >= low - slack
-                and end <= high + slack
-                and (end - start) < span - slack
-            ]
-            if len(inner) < 2:
-                continue
-            inner.sort(key=lambda item: item[1])
-            cursor = low
-            chain: list[Dimension] = []
-            for dim, start, end in inner:
-                if abs(start - cursor) <= slack:
-                    chain.append(dim)
-                    cursor = end
-            if len(chain) >= 2 and abs(cursor - high) <= slack:
-                chains.append((overall, chain))
-    return chains
 
 
 def _cluster_chains(
     dims: list[Dimension], relative_tolerance: float
-) -> list[tuple[Dimension, list[Dimension]]]:
-    chains: list[tuple[Dimension, list[Dimension]]] = []
-    for axis in ("x", "y"):
+) -> list[DimensionCycle]:
+    """Fallback for sources that do not record what each dimension measures."""
+    chains: list[DimensionCycle] = []
+    for axis, degrees in (("x", 0.0), ("y", 90.0)):
         for cluster in collinear_clusters(dims, axis):
             values = [(dim, _measured_value(dim) or 0.0) for dim in cluster]
             overall_dim, overall_value = max(values, key=lambda pair: pair[1])
@@ -218,7 +173,14 @@ def _cluster_chains(
                 continue
             total = sum(value for _, value in parts)
             if abs(total - overall_value) <= overall_value * relative_tolerance:
-                chains.append((overall_dim, [dim for dim, _ in parts]))
+                chains.append(
+                    DimensionCycle(
+                        axis=degrees,
+                        dimensions=(overall_dim, *(dim for dim, _ in parts)),
+                        closing=overall_dim,
+                        exact=False,
+                    )
+                )
     return chains
 
 
@@ -276,3 +238,33 @@ def outside_sheet(sheet: Sheet, margin_ratio: float = 0.0) -> list[str]:
         for obj in sheet.objects()
         if obj.bbox is not None and not inner.contains(obj.bbox) and not inner.intersects(obj.bbox)
     ]
+
+
+# --------------------------------------------------------------------------
+# Tolerance arithmetic
+# --------------------------------------------------------------------------
+#: Tolerance notations that carry numbers we can compute with.  Fit classes
+#: (H7, g6) do not: their numeric limits come from ISO 286, which this package
+#: does not tabulate, so they are reported as "unknown" rather than guessed.
+_NUMERIC_KINDS = {ToleranceKind.SYMMETRIC, ToleranceKind.DEVIATION, ToleranceKind.LIMITS}
+
+
+def tolerance_deviations(dim: Dimension) -> tuple[float, float] | None:
+    """Explicit deviations of ``dim`` as ``(upper, lower)`` around its nominal."""
+    tol = dim.tolerance
+    if tol.kind not in _NUMERIC_KINDS or tol.upper is None or tol.lower is None:
+        return None
+    if tol.kind is ToleranceKind.LIMITS:
+        if dim.nominal is None:
+            return None
+        return (tol.upper - dim.nominal, tol.lower - dim.nominal)
+    return (tol.upper, tol.lower)
+
+
+def tolerance_width(dim: Dimension) -> float | None:
+    """Width of the explicit tolerance zone of ``dim``."""
+    deviations = tolerance_deviations(dim)
+    if deviations is None:
+        return None
+    upper, lower = deviations
+    return abs(upper - lower)

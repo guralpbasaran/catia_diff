@@ -6,7 +6,7 @@ from collections import Counter
 from collections.abc import Iterable
 
 from catia_diff.config import Profile
-from catia_diff.models.drawing import MaterialCondition, Sheet
+from catia_diff.models.drawing import GDTCharacteristic, MaterialCondition, Sheet
 from catia_diff.models.findings import Category, Finding, Severity
 from catia_diff.rules.base import Rule, RuleContext, RuleMeta, register
 
@@ -228,8 +228,6 @@ class PositionWithoutBasicRule(Rule):
     )
 
     def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
-        from catia_diff.models.drawing import GDTCharacteristic
-
         positional = [
             gtol
             for gtol in target.geometric_tolerances
@@ -271,8 +269,6 @@ class PositionZoneShapeRule(Rule):
     )
 
     def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
-        from catia_diff.models.drawing import GDTCharacteristic
-
         for gtol in target.geometric_tolerances:
             if gtol.characteristic is not GDTCharacteristic.POSITION or gtol.diametral_zone:
                 continue
@@ -309,8 +305,6 @@ class ModifierOnFormToleranceRule(Rule):
     )
 
     def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
-        from catia_diff.models.drawing import GDTCharacteristic
-
         surface_form = {GDTCharacteristic.FLATNESS, GDTCharacteristic.CIRCULARITY}
         for gtol in target.geometric_tolerances:
             if gtol.characteristic not in surface_form:
@@ -369,5 +363,59 @@ class RepeatedDatumInFrameRule(Rule):
                 bbox=gtol.bbox,
                 object_ids=[gtol.id],
                 snippet=gtol.raw,
+                agent=AGENT,
+            )
+
+
+@register
+class GeometricLooserThanGeneralRule(Rule):
+    meta = RuleMeta(
+        id="GDT011",
+        title="Geometric tolerance is looser than the general one",
+        title_tr="Geometrik tolerans genel toleranstan daha geniş",
+        severity=Severity.MINOR,
+        category=Category.GDT,
+        standards=("ISO 2768-2 §4", "ISO 1101"),
+        description=(
+            "A frame wider than the ISO 2768-2 general tolerance relaxes the part rather "
+            "than controlling it, which is legal but rarely intended."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        spec = ctx.general_spec(target)
+        if spec is None or spec.geometric is None:
+            return
+        size_mm = ctx.governing_length_mm(target)
+        for gtol in target.geometric_tolerances:
+            if gtol.value is None or gtol.value <= 0:
+                continue  # GDT006 owns missing values
+            general = spec.geometric_limit_mm(gtol.characteristic, size_mm)
+            if general is None or gtol.value <= general * (1 + 1e-9):
+                continue
+            size_text = f" (for lengths up to {size_mm:g} mm)" if size_mm else ""
+            size_text_tr = f" ({size_mm:g} mm'ye kadar uzunluklar için)" if size_mm else ""
+            yield self.finding(
+                message=(
+                    f"{gtol.characteristic.value} {gtol.value:g} mm is looser than the general "
+                    f"geometrical tolerance {general:g} mm of {spec.designation}{size_text}."
+                ),
+                message_tr=(
+                    f"{gtol.characteristic.value} {gtol.value:g} mm değeri, {spec.designation} "
+                    f"genel geometrik toleransından ({general:g} mm) daha geniş{size_text_tr}."
+                ),
+                suggestion=(
+                    "Either tighten the frame below the general tolerance or remove it - as "
+                    "drawn it controls nothing the general note does not already allow."
+                ),
+                suggestion_tr=(
+                    "Çerçeveyi genel toleransın altına çekin ya da kaldırın; bu hâliyle genel "
+                    "notun zaten izin verdiğinden fazlasını denetlemiyor."
+                ),
+                sheet_index=target.index,
+                bbox=gtol.bbox,
+                object_ids=[gtol.id],
+                snippet=gtol.raw,
+                confidence=0.7,
                 agent=AGENT,
             )

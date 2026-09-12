@@ -22,6 +22,7 @@ from catia_diff.llm.prompts import build_instruction
 from catia_diff.llm.schemas import VisionSheetExtraction
 from catia_diff.models.drawing import Sheet, SourceFormat
 from catia_diff.models.messages import AgentResult, AgentStatus, AgentTask, TaskKind
+from catia_diff.rules.views import segment_views
 
 logger = logging.getLogger("catia_diff.agents.extraction")
 
@@ -38,6 +39,10 @@ class ExtractionAgent(Agent):
 
         warnings = list(document.warnings)
         status = AgentStatus.OK
+        # Views are segmented here, once, while nothing else touches the
+        # document: the checker agents run in parallel and only read it.
+        for sheet in document.sheets:
+            segment_views(sheet, ctx.config)
         vision_sheets = [sheet for sheet in document.sheets if self._needs_vision(sheet, ctx)]
         if vision_sheets and ctx.config.vision.enabled:
             model = ctx.vision_model or build_vision_model(ctx.config.vision)

@@ -505,14 +505,21 @@ class ParsedSurfaceFinish:
     raw: str
 
 
-_RA_RE = re.compile(rf"\bRa\s*=?\s*({_NUM})", re.IGNORECASE)
-_RZ_RE = re.compile(rf"\bRz\s*=?\s*({_NUM})", re.IGNORECASE)
-_SURFACE_MARKERS = ("√", "∇", "⊽", "Ra", "Rz", "RA", "RZ")
+_RA_RE = re.compile(rf"(?<![A-Za-z])Ra\s*=?\s*({_NUM})", re.IGNORECASE)
+_RZ_RE = re.compile(rf"(?<![A-Za-z])Rz\s*=?\s*({_NUM})", re.IGNORECASE)
+_SURFACE_GLYPHS = ("√", "∇", "⊽")
+#: "Ra"/"Rz" only count as roughness parameters when they stand alone - as a
+#: substring they hide inside ordinary words ("GENEL TOLE**RA**NSLAR").
+_SURFACE_PARAM_RE = re.compile(r"(?<![A-Za-z])R[az](?![A-Za-z])", re.IGNORECASE)
 
 
 def parse_surface_finish(raw: str | None) -> ParsedSurfaceFinish | None:
     text = normalize_drawing_text(raw).replace("\x01gdt\x01", "")
-    if not text or not any(marker in text for marker in _SURFACE_MARKERS):
+    if not text:
+        return None
+    if not (
+        any(glyph in text for glyph in _SURFACE_GLYPHS) or _SURFACE_PARAM_RE.search(text)
+    ):
         return None
     ra_match = _RA_RE.search(text)
     rz_match = _RZ_RE.search(text)
@@ -548,8 +555,11 @@ class ParsedWeld:
     raw: str
 
 
+#: ISO 2553 weld size: the letter and the value are written together ("a5",
+#: "z6-50x100"). Allowing a space would swallow captions such as "DETAIL A 2".
 _WELD_RE = re.compile(
-    rf"\b([az])\s*({_NUM})(?:\s*-\s*(\d+)\s*[x×]\s*(\d+))?", re.IGNORECASE
+    r"(?<![A-Za-z])([az])(\d+(?:[.,]\d+)?)(?:\s*-\s*(\d+)\s*[x×]\s*(\d+))?",
+    re.IGNORECASE,
 )
 _WELD_WORDS = re.compile(
     r"\b(fillet|kaynak|weld|butt|square|bevel|köşe|alın)\b", re.IGNORECASE
@@ -651,3 +661,56 @@ def detect_units_note(text: str | None) -> Units | None:
     if "INCH" in blob:
         return Units.INCH
     return Units.MM
+
+
+# --------------------------------------------------------------------------
+# Blanket notes
+# --------------------------------------------------------------------------
+#: Categories a blanket note can cover.
+BLANKET_RADII = "radii"
+BLANKET_CHAMFERS = "chamfers"
+BLANKET_GENERAL = "general"
+
+_BLANKET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        BLANKET_RADII,
+        re.compile(
+            r"(?:T[ÜU]M|B[ÜU]T[ÜU]N|BEL[İI]RT[İI]LMEYEN|ALL|UNSPECIFIED|UNMARKED)\s+"
+            r"(?:RADY[ÜU]S|YAR[İI][ÇC]AP|RADI[İI]|RADII|RADIUS(?:ES)?|FILLETS?|KÖ[ŞS]E)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        BLANKET_CHAMFERS,
+        re.compile(
+            r"(?:T[ÜU]M|B[ÜU]T[ÜU]N|BEL[İI]RT[İI]LMEYEN|ALL|UNSPECIFIED)\s+(?:PAH|CHAMFERS?)"
+            r"|BREAK\s+(?:ALL\s+)?(?:SHARP\s+)?EDGES"
+            r"|KESK[İI]N\s+K[ÖO][ŞS]ELER",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        BLANKET_GENERAL,
+        re.compile(
+            r"UNLESS\s+OTHERWISE\s+(?:SPECIFIED|STATED|NOTED)"
+            r"|AKS[İI]\s+BEL[İI]RT[İI]LMED[İI][ĞG][İI]\s+(?:S[ÜU]RECE|DURUMDA|TAKD[İI]RDE)"
+            r"|BEL[İI]RT[İI]LMED[İI][ĞG][İI]\s+S[ÜU]RECE",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+
+def detect_blanket_notes(text: str | None) -> frozenset[str]:
+    """Categories covered by blanket notes such as "ALL FILLETS R3".
+
+    A drawing may legitimately leave individual callouts off when a note
+    already covers them; the checkers use this to stay quiet instead of
+    reporting a defect the draughtsman deliberately avoided.
+    """
+    if not text:
+        return frozenset()
+    normalized = normalize_drawing_text(text)
+    return frozenset(
+        category for category, pattern in _BLANKET_PATTERNS if pattern.search(normalized)
+    )
