@@ -26,11 +26,12 @@ python -m venv .venv && .venv/bin/pip install -e ".[all,dev]"
 
 .venv/bin/python -m pytest            # 374 test
 .venv/bin/python -m pytest --cov=src/catia_diff --cov-report=term-missing
-.venv/bin/ruff check src tests examples
+.venv/bin/ruff check src tests examples run_ui.py
 .venv/bin/mypy src
 
 catia-diff audit examples/sample_plate.dxf --lang tr --out reports
 catia-diff ui --port 8050 --lang tr   # tarayıcı panosu (Dash)
+python run_ui.py                      # aynı pano, IDE'den tek tık (parametresiz)
 catia-diff rules --lang tr            # 63 kural
 catia-diff formats
 python examples/generate_sample_drawing.py /tmp/tam.dxf --complete --fits --iso2768

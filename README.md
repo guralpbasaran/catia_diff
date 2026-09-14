@@ -186,6 +186,10 @@ catia-diff ui                       # http://127.0.0.1:8050
 catia-diff ui --port 8080 --lang en --profile ASME
 ```
 
+IDE kullanıyorsanız parametre yazmanıza gerek yok: kökteki **`run_ui.py`** dosyasına
+sağ tık → *Run* yeter (PyCharm, VS Code). Paket kurulu olmasa bile çalışır; port ve
+dil dosyanın başındaki dört sabitten değiştirilir.
+
 ![catia-diff panosu](docs/images/dashboard.png)
 
 Resmi sürükleyip bırakın (ya da **Örnek resmi dene** ile başlayın); sayfa şunu
@@ -281,7 +285,7 @@ Kayıt otomatiktir; CLI, rapor ve testler kuralı hemen görür.
 ```bash
 pytest -q                      # 374 test, isteğe bağlı bağımlılık yoksa atlanır
 pytest --cov=catia_diff        # ~%91 kapsam
-ruff check src tests examples
+ruff check src tests examples run_ui.py
 ```
 
 Testler ağ erişimi ve tarayıcı gerektirmez: Claude çağrıları `MockVisionModel`
