@@ -16,13 +16,32 @@ prioritised, marked-up report.*
 | Aile | Örnek bulgular |
 | --- | --- |
 | Ölçülendirme (`DIM001–DIM015`) | **konumu belirlenmemiş delik**, ölçü zincirine bağlanmamış geometri, ölçüsüz görünüş, ölçülendirilmemiş delik, kapalı ölçü zinciri (aşırı ölçülendirme), **ölçü metni geometriyle uyuşmuyor**, eksik ⌀ sembolü, toplam ölçü yok, açısı verilmemiş eğik kenar |
-| Tolerans (`TOL001–TOL010`) | toleranssız ölçü (genel tolerans notu yoksa majör), ters/sıfır tolerans aralığı, ondalık hane uyumsuzluğu, gerçekçi olmayan dar tolerans, karışık gösterim, **ISO 2768 sayısal denetimleri** (aşağıya bakın) |
+| Tolerans (`TOL001–TOL012`) | toleranssız ölçü (genel tolerans notu yoksa majör), ters/sıfır tolerans aralığı, ondalık hane uyumsuzluğu, gerçekçi olmayan dar tolerans, karışık gösterim, **ISO 2768 ve ISO 286 sayısal denetimleri** (aşağıya bakın) |
 | Geometrik tolerans (`GDT001–GDT011`) | tanımsız datum referansı, datumsuz diklik/konum toleransı, datumlu biçim toleransı, tekrarlanan datum, teorik ölçüsü olmayan konum toleransı, genel geometrik toleranstan geniş çerçeve |
 | Semboller (`SYM001–SYM005`) | değersiz yüzey sembolü, ölçüsüz kaynak sembolü, adımsız aralıklı kaynak, gerçekçi olmayan Ra |
 | Antet (`TB001–TB011`) | antet yok, zorunlu alan boş, "TBD" yer tutucusu, standart dışı ölçek, tarihsiz revizyon, çizen = onaylayan, izdüşüm yöntemi yok, birim yok, sayfa numarası tutarsız |
 | Tutarlılık (`CON001–CON006`) | karışık birimler, ölçek–geometri uyuşmazlığı, sayfalar arası resim no çakışması, görsel çıkarım yapılmadan okunamayan sayfa |
 
-Tam liste: `catia-diff rules --lang tr` (58 kural)
+Tam liste: `catia-diff rules --lang tr` (60 kural)
+
+### ISO 286 geçme sınıfları sayısal olarak
+
+`⌀25 H7` artık "bilinmeyen tolerans" değil: IT dereceleri ve temel sapma tabloları
+`catia_diff.standards.iso286` içinde veridir, gösterim gerçek sapmalara çözülür ve
+**tüm sayısal tolerans kuralları geçmeli ölçülerde de çalışır**.
+
+```python
+deviations(25.0, parse_fit("H7"))       # (0.021, 0.0)
+clearance(25.0, parse_fit("H7/p6"))     # (-0.035, -0.001) → sıkı geçme
+deviations(25.0, parse_fit("u6"))       # None — kapsam dışı, tahmin yok
+```
+
+İki yeni kural: `TOL011` geçme sınıfı sayıya çevrilemedi (nedeniyle birlikte) ·
+`TOL012` sıkı/geçiş geçme, hesaplanmış boşluk aralığıyla. Delik sapmaları
+tablodan değil standardın kendi kurallarından türetilir (`EI = −es`, Δ kuralı) ve
+tablolar ISO'nun üretici formülüne karşı testlerde doğrulanır.
+
+Kapsam, sınırlar ve tam tablolar: [`docs/ISO286.md`](docs/ISO286.md).
 
 ### Eksik ölçülendirme sayısal olarak
 
@@ -83,8 +102,8 @@ pip install -e ".[all,dev]"       # veya: pip install -e ".[dxf,pdf,raster,repor
 
 Çekirdek yalnızca `pydantic` ister. İsteğe bağlı ekler:
 `dxf` (ezdxf) · `pdf` (PyMuPDF) · `raster` (Pillow, NumPy) · `cv` (OpenCV) ·
-`llm` (anthropic) · `report` (Jinja2). Eksik olan bir ek yalnızca ilgili yolu
-kapatır, programı durdurmaz.
+`llm` (anthropic) · `report` (Jinja2) · `ui` (Dash, tarayıcı arayüzü). Eksik
+olan bir ek yalnızca ilgili yolu kapatır, programı durdurmaz.
 
 Claude Vision için kimlik: `export ANTHROPIC_API_KEY=...` (veya `ant auth login`).
 
@@ -103,6 +122,10 @@ catia-diff audit examples/sample_2768.dxf --lang tr --out reports
 python examples/generate_sample_drawing.py examples/sample_ok.dxf --complete
 catia-diff audit examples/sample_ok.dxf --lang tr --out reports
 
+# ISO 286 geçme sınıfları: sıkı geçme ve kapsam dışı harf
+python examples/generate_sample_drawing.py examples/sample_fits.dxf --fits
+catia-diff audit examples/sample_fits.dxf --lang tr --out reports
+
 # Taranmış PDF: metin katmanı yoksa otomatik olarak Claude Vision devreye girer
 catia-diff audit tarama.pdf --vision auto --dpi 300
 
@@ -112,6 +135,9 @@ catia-diff audit part.dxf --profile ASME --min-severity critical --fail-on criti
 # Kural seçimi
 catia-diff audit part.dxf --only DIM001,DIM003
 catia-diff audit part.dxf --disable TOL001 --category gdt,title_block
+
+# Tarayıcı arayüzü
+catia-diff ui --port 8050 --lang tr
 ```
 
 Çıkış kodları: `0` temiz · `1` `--fail-on` eşiğinde bulgu var · `2` dosya
@@ -120,6 +146,34 @@ okunamadı.
 Üretilen dosyalar: `<ad>_audit.json`, `<ad>_audit.md`, `<ad>_audit.html`
 (filtrelenebilir kartlar, açık/koyu tema) ve sayfa başına
 `<ad>_sheetN_overlay.png` (bulgular numaralandırılmış kutularla işaretli).
+
+## Web arayüzü / Dashboard
+
+Komut satırı istemeyenler için aynı denetim tarayıcıda:
+
+```bash
+catia-diff ui                       # http://127.0.0.1:8050
+catia-diff ui --port 8080 --lang en --profile ASME
+```
+
+![catia-diff panosu](docs/images/dashboard.png)
+
+Resmi sürükleyip bırakın (ya da **Örnek resmi dene** ile başlayın); sayfa şunu
+verir:
+
+* **Serbest bırakma kararı** — seçtiğiniz eşiğe göre, CLI'ın çıkış koduyla aynı
+  mantık: *"4 bulgu eşiği aşıyor — serbest bırakmayın (çıkış kodu 1)"*.
+* **Önem kartları** ve kategori başına yığılmış çubuk — hangi aile yanıyor.
+* **Bulgu tablosu** — önem/kategori filtreli; bir satıra tıklayınca altında
+  bulgunun tamamı: mesaj, önerilen düzeltme, standart maddesi, güven ve
+  **resimdeki kutu numarası**.
+* **İşaretli resim** sekmesi — numaralı kutular tablodaki `No` ile birebir aynı.
+* **Belge** sekmesi — çıkarılan nesne sayıları, süre, uyarılar.
+* **Raporu indir** — JSON · Markdown · HTML, komut satırındakiyle aynı dosyalar.
+
+Dil anahtarı denetimi yeniden çalıştırmaz: bulgular modelde zaten iki dillidir,
+sayfa yalnızca dili değiştirir. Sunucu yereldir; vektörel dosyalarda hiçbir veri
+makineden çıkmaz.
 
 ### Python API
 
@@ -159,7 +213,8 @@ Orchestrator
 
 Ayrıntılar, akış diyagramı, mesaj protokolü ve veri modeli:
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · ISO 2768 sayısal referansı:
-[`docs/ISO2768.md`](docs/ISO2768.md) · eksik ölçülendirme modeli:
+[`docs/ISO2768.md`](docs/ISO2768.md) · ISO 286 geçme referansı:
+[`docs/ISO286.md`](docs/ISO286.md) · eksik ölçülendirme modeli:
 [`docs/DIMENSION_COVERAGE.md`](docs/DIMENSION_COVERAGE.md).
 
 ## Yeni kural ekleme / Adding a rule
@@ -194,13 +249,14 @@ Kayıt otomatiktir; CLI, rapor ve testler kuralı hemen görür.
 ## Geliştirme / Development
 
 ```bash
-pytest -q                      # 251 test, isteğe bağlı bağımlılık yoksa atlanır
-pytest --cov=catia_diff        # ~%89 kapsam
+pytest -q                      # 352 test, isteğe bağlı bağımlılık yoksa atlanır
+pytest --cov=catia_diff        # ~%90 kapsam
 ruff check src tests examples
 ```
 
-Testler ağ erişimi gerektirmez: Claude çağrıları `MockVisionModel` ve sahte bir
-istemci ile doğrulanır.
+Testler ağ erişimi ve tarayıcı gerektirmez: Claude çağrıları `MockVisionModel`
+ve sahte bir istemci ile, pano ise Dash'e bağımlı olmayan sunum/servis
+katmanıyla doğrulanır.
 
 ## Sınırlar / Known limits
 
@@ -212,8 +268,12 @@ istemci ile doğrulanır.
 * Unsur–ölçü eşleştirmesi ve kapalı zincir (raster yolda) sezgiseldir;
   bulgular `confidence < 1.0` ile işaretlenir.
 * DWG doğrudan okunmaz.
-* ISO 286 geçme sınıfları (H7, g6) sayısal olarak çözülmez; bu toleranslar
-  "bilinmiyor" sayılır ve sayısal karşılaştırmalara girmez.
+* Pano yerel ve tek kullanıcılıktır: kimlik doğrulama, oturum ve kalıcı depolama
+  yoktur, yüklenen dosya geçici klasöre yazılır (son 5 koşu tutulur). Ağa açmak
+  için önüne kimlik denetimi yapan bir vekil sunucu koyun.
+* ISO 286 kapsamı kısmidir: miller `d e f g h js k m n p`, dereceler IT5–IT14,
+  ölçüler 0,5–500 mm. Dışında kalan her gösterim çözülmez ve `TOL011` ile
+  raporlanır — sessizce tahmin üretilmez.
 * ISO 2768-1 açı tablosu açının kısa kenarına göre indekslidir; 2B gösterim bunu
   vermediği için en geniş satır (en güvenli varsayım) kullanılır. Aynı şekilde
   ISO 2768-2 denetimi, çerçevenin ait olduğu unsurun boyu yerine sayfadaki en

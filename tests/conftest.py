@@ -161,6 +161,14 @@ def sample_dxf_complete(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def sample_dxf_fits(tmp_path_factory) -> Path:
+    """A fully dimensioned plate whose bores carry ISO 286 fit classes."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_fits.dxf"
+    _sample_builder()(fits=True).saveas(target)
+    return target
+
+
+@pytest.fixture(scope="session")
 def sample_dxf_iso2768(tmp_path_factory) -> Path:
     """The same drawing plus an ISO 2768-mK note and the defects it exposes."""
     target = tmp_path_factory.mktemp("drawings") / "TD-1001_2768.dxf"

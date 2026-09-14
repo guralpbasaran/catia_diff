@@ -66,6 +66,23 @@ def cap_per_rule(findings: list[Finding], limit: int) -> list[Finding]:
     return out
 
 
+def overlay_numbers(findings: list[Finding]) -> dict[str, int]:
+    """Map finding id to the box number drawn on its sheet overlay.
+
+    The overlay renderer numbers the located findings of each sheet in report
+    order; any surface that shows those numbers next to a finding (the Dash
+    table, for one) has to agree with it, so both read them from here.
+    """
+    numbers: dict[str, int] = {}
+    per_sheet: dict[int, int] = defaultdict(int)
+    for finding in findings:
+        if finding.evidence.bbox is None:
+            continue
+        per_sheet[finding.evidence.sheet_index] += 1
+        numbers[finding.id] = per_sheet[finding.evidence.sheet_index]
+    return numbers
+
+
 def sort_findings(findings: list[Finding]) -> list[Finding]:
     return sorted(findings, key=lambda f: f.sort_key())
 

@@ -57,10 +57,17 @@ _SEVERITY_LABELS: dict[str, dict[Severity, str]] = {
     },
 }
 
+#: One palette for every surface that shows a severity - overlay boxes, the
+#: HTML report and the Dash dashboard - so the same defect never changes colour
+#: between them.  The steps are not a taste decision: adjacent pairs are kept
+#: above the perceptual-separation floor for normal and colour-deficient vision
+#: (critical/major used to sit at DE 11.7, close enough to be confused side by
+#: side in an overlay).  Severity is always carried by a label as well, never by
+#: colour alone.
 SEVERITY_COLORS: dict[Severity, str] = {
-    Severity.CRITICAL: "#d7263d",
-    Severity.MAJOR: "#f46036",
-    Severity.MINOR: "#e8b400",
+    Severity.CRITICAL: "#b3001b",
+    Severity.MAJOR: "#f3922b",
+    Severity.MINOR: "#8f7200",
     Severity.INFO: "#3f88c5",
 }
 

@@ -149,6 +149,12 @@ GeneralToleranceSpec(standard="ISO 2768", linear=m, geometric=K)
    ±0.3 mm (56 mm, tablo 1)          0.2 mm (düzlemsellik, 80 mm, sınıf K)
 ```
 
+`iso286.py` aynı yaklaşımı ISO 286 için uygular: IT dereceleri ve mil temel
+sapmaları tablodur, **delik sapmaları standardın kendi kurallarıyla türetilir**
+(`EI = −es`; K/M/N/P için `ES = −ei + Δ`), kapsam dışı her kombinasyon `None`
+döner. `⌀25 H7` böylece `+0,021/0`'a çözülür ve tüm sayısal tolerans kuralları
+geçmeli ölçülerde de çalışır.
+
 Kural tarafı bunları `RuleContext.general_spec(sheet)` üzerinden alır; `TOL006`
 notun okunabilirliğini, `TOL007` kapsamı, `TOL008`/`TOL009` yazılı toleransla
 karşılaştırmayı, `TOL010` zincir birikimini ve `GDT011` geometrik karşılaştırmayı
@@ -192,7 +198,39 @@ vermez ve kurallar o zaman hiç çalışmaz. Ayrıntı: [`DIMENSION_COVERAGE.md`
 * Büyük sayfalar `extract/raster.py` ile döşenir (tile); OpenCV varsa gürültü
   temizleme + eğrilik düzeltme uygulanır, yoksa adım atlanır.
 
-## 8. Tasarım kararları / Design decisions
+## 8. Arayüz katmanı / Dashboard
+
+`ui/` paketi denetime hiçbir şey öğretmez; yalnızca gösterir. Katmanlar:
+
+| Modül | Sorumluluk | Dash'e bağımlı mı |
+| --- | --- | --- |
+| `ui/service.py` | Yüklenen dosyayı çözme, boyut/format denetimi, `Orchestrator`'ı çağırma, raporu indirilebilir metne çevirme | hayır |
+| `ui/presenters.py` | `AuditReport` → ekran modeli (kartlar, satırlar, grafik verisi, kapı durumu), iki dilli etiketler | hayır |
+| `ui/charts.py` | Ekran modeli → Plotly figürü | yalnızca plotly |
+| `ui/theme.py` | Renk/ölçü belirteçleri | hayır |
+| `ui/app.py` | Yerleşim + geri çağırma bağlantıları | evet |
+
+Kural: **geri çağırmalar (callback) ince kalır.** Her biri `*_view` fonksiyonuna
+devreder; bu fonksiyonlar düz değerler alır, düz değerler döndürür ve testten
+doğrudan çağrılır (`tests/test_ui.py`). Bir geri çağırmanın döndürdüğü değer
+sayısının çıktı sayısıyla eşleştiği bile testle doğrulanır — aksi halde hata
+yalnızca tarayıcıda görülür.
+
+Diğer sözleşmeler:
+
+* Yüklenen dosya geçici bir çalışma klasörüne yazılır (`/tmp/catia-diff-ui/…`,
+  son 5 koşu tutulur); rapor dosyaları diske yazılmaz, indirmeler bellekteki
+  rapordan üretilir.
+* Desteklenmeyen uzantı, bozuk base64 veya boyut aşımı **bulgu değil hatadır**:
+  ekran nedenini yazar, tahmin üretmez. Uzantı denetimi gerçek çıkarıcı
+  kayıt defterinden geçer, böylece DWG için CLI ile aynı yönlendirme çıkar.
+* Tablodaki `No` sütunu ile işaretli resimdeki kutu numarası tek kaynaktan
+  gelir (`reporting/normalize.overlay_numbers`), bu yüzden ayrışamazlar.
+* Önem renkleri tek yerde tanımlıdır (`models/findings.SEVERITY_COLORS`) ve
+  overlay, HTML rapor ve pano aynı paleti kullanır; komşu renkler algısal
+  ayrım eşiğinin üstünde tutulur, ayrıca önem her yerde metinle de yazılır.
+
+## 9. Tasarım kararları / Design decisions
 
 | Karar | Gerekçe |
 | --- | --- |
@@ -202,6 +240,7 @@ vermez ve kurallar o zaman hiç çalışmaz. Ayrıntı: [`DIMENSION_COVERAGE.md`
 | Ajan başına hata kapsaması | Bir ajanın çökmesi "temiz rapor" üretmemeli. |
 | `confidence` alanı | Sezgisel kural ile kesin kural aynı listede ama ayırt edilebilir. |
 | İsteğe bağlı bağımlılıklar | Çekirdek yalnızca pydantic ister; ezdxf/PyMuPDF/Pillow/anthropic yoksa ilgili yol kapanır, program çalışır. |
-| Standart tabloları ayrı paket | ISO 2768 verisi kural mantığından bağımsız; test edilebilir, genişletilebilir (ISO 286 aynı yere girer). |
+| Standart tabloları ayrı paket | ISO 2768 ve ISO 286 verisi kural mantığından bağımsız; test edilebilir, genişletilebilir. |
+| Tablolar formülle denetlenir | Standardın üretici formülü, testte transkripsiyon hatası dedektörü olarak kullanılır. |
 | Tanımsız yerde `None` | Standardın vermediği değer (silindiriklik, konum) uydurulmaz; kural sessiz kalır. |
 | Kapsam analizi kesin ya da yok | Aralık verisi olmadan tahmin yürütmek yerine kural hiç çalışmaz. |

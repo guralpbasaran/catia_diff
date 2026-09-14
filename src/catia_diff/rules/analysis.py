@@ -243,15 +243,16 @@ def outside_sheet(sheet: Sheet, margin_ratio: float = 0.0) -> list[str]:
 # --------------------------------------------------------------------------
 # Tolerance arithmetic
 # --------------------------------------------------------------------------
-#: Tolerance notations that carry numbers we can compute with.  Fit classes
-#: (H7, g6) do not: their numeric limits come from ISO 286, which this package
-#: does not tabulate, so they are reported as "unknown" rather than guessed.
+#: Tolerance notations that state their deviations directly.  Fit classes
+#: (H7, g6) state them through ISO 286 instead - see :func:`fit_deviations`.
 _NUMERIC_KINDS = {ToleranceKind.SYMMETRIC, ToleranceKind.DEVIATION, ToleranceKind.LIMITS}
 
 
 def tolerance_deviations(dim: Dimension) -> tuple[float, float] | None:
     """Explicit deviations of ``dim`` as ``(upper, lower)`` around its nominal."""
     tol = dim.tolerance
+    if tol.kind is ToleranceKind.FIT_CLASS:
+        return fit_deviations(dim)
     if tol.kind not in _NUMERIC_KINDS or tol.upper is None or tol.lower is None:
         return None
     if tol.kind is ToleranceKind.LIMITS:
@@ -259,6 +260,39 @@ def tolerance_deviations(dim: Dimension) -> tuple[float, float] | None:
             return None
         return (tol.upper - dim.nominal, tol.lower - dim.nominal)
     return (tol.upper, tol.lower)
+
+
+def fit_class_of(dim: Dimension):
+    """The parsed ISO 286 code of ``dim``, or ``None``."""
+    from catia_diff.standards import iso286
+
+    if dim.tolerance.kind is not ToleranceKind.FIT_CLASS:
+        return None
+    return iso286.parse_fit(dim.tolerance.fit_class)
+
+
+def fit_deviations(dim: Dimension) -> tuple[float, float] | None:
+    """Resolve an ISO 286 fit class into deviations, in the dimension's unit.
+
+    A mating pair (``H7/g6``) describes an assembly rather than one part, so it
+    yields no single tolerance; :mod:`catia_diff.standards.iso286` analyses the
+    pair's clearance instead.
+    """
+    from catia_diff.standards import iso286
+    from catia_diff.standards.iso2768 import from_mm, to_mm
+
+    fit = fit_class_of(dim)
+    if not isinstance(fit, iso286.FitClass):
+        return None
+    nominal_mm = to_mm(dim.nominal, dim.units)
+    resolved = iso286.deviations(nominal_mm, fit)
+    if resolved is None:
+        return None
+    upper = from_mm(resolved[0], dim.units)
+    lower = from_mm(resolved[1], dim.units)
+    if upper is None or lower is None:
+        return None
+    return (upper, lower)
 
 
 def tolerance_width(dim: Dimension) -> float | None:

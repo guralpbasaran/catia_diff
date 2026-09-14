@@ -10,6 +10,7 @@ from catia_diff.extract.raster import render_pdf_page
 from catia_diff.models.drawing import DrawingDocument, GeometryKind, Sheet, SourceFormat
 from catia_diff.models.findings import SEVERITY_COLORS, AuditReport, Finding
 from catia_diff.models.geometry import BBox, CoordinateSpace
+from catia_diff.reporting.normalize import overlay_numbers
 
 MAX_CANVAS_PX = 2200
 MIN_CANVAS_PX = 900
@@ -38,10 +39,12 @@ def render_overlays(
         draw = ImageDraw.Draw(base, "RGBA")
         _draw_context(draw, sheet, scale, base.size)
 
-        numbered = [f for f in findings if f.evidence.bbox is not None]
-        for number, finding in enumerate(numbered, start=1):
-            _draw_finding(draw, finding, number, sheet, scale, base.size)
-        _draw_legend(draw, findings, base.size)
+        numbers = overlay_numbers(findings)
+        for finding in findings:
+            number = numbers.get(finding.id)
+            if number is not None:
+                _draw_finding(draw, finding, number, sheet, scale, base.size)
+        _draw_legend(draw, findings, base.size, config.language)
 
         path = out_dir / f"{document.source_path.stem}_sheet{sheet.index + 1}_overlay.png"
         base.save(path)
@@ -139,7 +142,7 @@ def _draw_finding(draw, finding: Finding, number: int, sheet: Sheet, scale: floa
     draw.text((bx0 + 5, by0 + 4), label, fill="white")
 
 
-def _draw_legend(draw, findings: list[Finding], size: tuple[int, int]) -> None:
+def _draw_legend(draw, findings: list[Finding], size: tuple[int, int], lang: str = "en") -> None:
     counts: dict = {}
     for finding in findings:
         counts[finding.severity] = counts.get(finding.severity, 0) + 1
@@ -154,7 +157,7 @@ def _draw_legend(draw, findings: list[Finding], size: tuple[int, int]) -> None:
         y = y0 + pad + index * row
         rgb = _hex_to_rgb(SEVERITY_COLORS[severity])
         draw.rectangle((x0 + pad, y + 3, x0 + pad + 12, y + 13), fill=rgb)
-        draw.text((x0 + pad + 20, y + 2), f"{severity.value}: {count}", fill=(30, 30, 30))
+        draw.text((x0 + pad + 20, y + 2), f"{severity.label(lang)}: {count}", fill=(30, 30, 30))
 
 
 def _hex_to_rgb(value: str) -> tuple[int, int, int]:

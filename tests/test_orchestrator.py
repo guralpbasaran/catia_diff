@@ -68,6 +68,23 @@ def test_general_tolerance_note_is_not_a_surface_symbol(sample_dxf_iso2768, conf
     assert report.document_stats["surface_finishes"] == 1
 
 
+def test_iso286_fit_rules_fire_end_to_end(sample_dxf_fits, config):
+    report = Orchestrator(config).audit(sample_dxf_fits)
+    found = {finding.rule_id for finding in report.findings}
+    assert {"TOL011", "TOL012"} <= found
+
+    interference = next(f for f in report.findings if f.rule_id == "TOL012")
+    assert "H7/p6" in interference.message
+    assert "-35" in interference.message  # computed, not transcribed
+
+    unresolved = next(f for f in report.findings if f.rule_id == "TOL011")
+    assert "u6" in unresolved.message
+
+    # the drawing is otherwise sound: nothing critical or major
+    assert report.counts_by_severity()[Severity.CRITICAL] == 0
+    assert report.counts_by_severity()[Severity.MAJOR] == 0
+
+
 def test_written_json_carries_the_agent_trace(sample_dxf, config):
     Orchestrator(config).audit(sample_dxf)
     payload = json.loads((config.output_dir / "TD-1001_sample_audit.json").read_text())
