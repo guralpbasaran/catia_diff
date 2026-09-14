@@ -169,6 +169,22 @@ def sample_dxf_fits(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def sample_dxf_views(tmp_path_factory) -> Path:
+    """Three orthographic views carrying two cross-view defects."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_views.dxf"
+    _sample_builder()(views=True).saveas(target)
+    return target
+
+
+@pytest.fixture(scope="session")
+def sample_dxf_views_correct(tmp_path_factory) -> Path:
+    """The same three views, consistent - the cross-view false-positive net."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_views_ok.dxf"
+    _sample_builder()(views=True, complete=True).saveas(target)
+    return target
+
+
+@pytest.fixture(scope="session")
 def sample_dxf_iso2768(tmp_path_factory) -> Path:
     """The same drawing plus an ISO 2768-mK note and the defects it exposes."""
     target = tmp_path_factory.mktemp("drawings") / "TD-1001_2768.dxf"
