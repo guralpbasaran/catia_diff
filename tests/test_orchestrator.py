@@ -214,3 +214,22 @@ def test_unreadable_file_produces_a_report_not_an_exception(tmp_path, config):
 def test_audit_file_helper(sample_dxf, config):
     report = audit_file(sample_dxf, config)
     assert report.findings
+
+
+def test_the_committed_sample_drawing_still_carries_its_defects(config):
+    """``examples/sample_plate.dxf`` is checked in, so it can drift from the generator.
+
+    The quick start and the dashboard's sample button both open this exact file;
+    if an edit to the generator stops it demonstrating the documented defects,
+    the first thing a new user runs would be misleading.
+    """
+    from pathlib import Path
+
+    sample = Path(__file__).resolve().parents[1] / "examples" / "sample_plate.dxf"
+    assert sample.exists(), "the sample drawing must stay in the repository"
+
+    report = Orchestrator(config).audit(sample)
+    found = {finding.rule_id for finding in report.findings}
+    assert {"DIM004", "DIM011", "GDT001", "TOL002"} <= found
+    assert report.counts_by_severity()[Severity.CRITICAL] == 4
+    assert report.document_stats["dimensions"] == 9

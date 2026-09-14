@@ -15,3 +15,5 @@ out/
 *.log
 .DS_Store
 examples/*.dxf
+# ...except the one the quick start and the dashboard's sample button use.
+!examples/sample_plate.dxf
