@@ -16,13 +16,14 @@ prioritised, marked-up report.*
 | Aile | Örnek bulgular |
 | --- | --- |
 | Ölçülendirme (`DIM001–DIM015`) | **konumu belirlenmemiş delik**, ölçü zincirine bağlanmamış geometri, ölçüsüz görünüş, ölçülendirilmemiş delik, kapalı ölçü zinciri (aşırı ölçülendirme), **ölçü metni geometriyle uyuşmuyor**, eksik ⌀ sembolü, toplam ölçü yok, açısı verilmemiş eğik kenar |
+| Görünüşler arası (`CRV001–CRV003`) | **hizalı görünüşler aynı ölçüyü farklı veriyor**, görünüş geometrileri uyuşmuyor, aynı ölçü iki görünüşte tekrarlanmış |
 | Tolerans (`TOL001–TOL012`) | toleranssız ölçü (genel tolerans notu yoksa majör), ters/sıfır tolerans aralığı, ondalık hane uyumsuzluğu, gerçekçi olmayan dar tolerans, karışık gösterim, **ISO 2768 ve ISO 286 sayısal denetimleri** (aşağıya bakın) |
 | Geometrik tolerans (`GDT001–GDT011`) | tanımsız datum referansı, datumsuz diklik/konum toleransı, datumlu biçim toleransı, tekrarlanan datum, teorik ölçüsü olmayan konum toleransı, genel geometrik toleranstan geniş çerçeve |
 | Semboller (`SYM001–SYM005`) | değersiz yüzey sembolü, ölçüsüz kaynak sembolü, adımsız aralıklı kaynak, gerçekçi olmayan Ra |
 | Antet (`TB001–TB011`) | antet yok, zorunlu alan boş, "TBD" yer tutucusu, standart dışı ölçek, tarihsiz revizyon, çizen = onaylayan, izdüşüm yöntemi yok, birim yok, sayfa numarası tutarsız |
 | Tutarlılık (`CON001–CON006`) | karışık birimler, ölçek–geometri uyuşmazlığı, sayfalar arası resim no çakışması, görsel çıkarım yapılmadan okunamayan sayfa |
 
-Tam liste: `catia-diff rules --lang tr` (60 kural)
+Tam liste: `catia-diff rules --lang tr` (63 kural)
 
 ### ISO 286 geçme sınıfları sayısal olarak
 
@@ -67,6 +68,28 @@ KRITIK DIM011  (12.0, 10.0), (68.0, 10.0) konumundaki ⌀6.5 unsuru Y ekseninde
 GD&T konum toleransı, `4x ⌀6.5 EŞİT BÖLÜNMÜŞ` patern notu, blanket notlar
 (`TÜM RADYÜSLER R3`) ve referans ölçüler ayrıca ele alınır — ayrıntılar ve sınırlar:
 [`docs/DIMENSION_COVERAGE.md`](docs/DIMENSION_COVERAGE.md).
+
+### Görünüşler arası tutarlılık
+
+Bir görünüşün içinde doğru olan her şey, diğer görünüşle çelişebilir. Ortografik
+yerleşimde üst görünüş ön görünüşün **genişliğini**, yan görünüş **yüksekliğini**
+paylaşır; düz bir kâğıtta iki görünüşü birbirine bağlayan tek şey bu ortak
+uzunluktur — ve iki soruyu cevaplamaya yeter:
+
+```
+catia-diff audit examples/sample_views.dxf --lang tr
+  KRITIK  CRV001  Görünüş 1 ortak X ölçüsünü 80 veriyor, Görünüş 3 ise 76 diyor.
+  MAJÖR   CRV002  Görünüş 1 Y ekseninde 40 çizilmiş, hizalı Görünüş 2 ise 38 (Δ=2).
+```
+
+Aynı mekanizma bir **yanlış pozitifi de kapatır**: ortografik uygulama bir ölçüyü
+tek görünüşte verir, o yüzden üst görünüşün X'i ölçülendirmemesi doğrudur. Kapsam
+kuralları artık hizalı görünüşten **miras** alır; bu olmadan doğru çizilmiş her
+çok görünüşlü resim uydurma "eksik ölçü" bulgusu üretirdi.
+
+Sınır dürüstçe konmuştur: iki görünüş ortak uzunlukları %10'dan fazla ayrışıyorsa
+aynı şeyi gösterdikleri kanıtlanamaz (detay, kopuk görünüş, farklı ölçek) ve
+hiçbir kural çalışmaz — tahmin etmek yerine susar.
 
 ### ISO 2768 sayısal olarak
 
@@ -121,6 +144,11 @@ catia-diff audit examples/sample_2768.dxf --lang tr --out reports
 # Tam ölçülendirilmiş varyant: kapsam kuralları hiç bulgu üretmemeli
 python examples/generate_sample_drawing.py examples/sample_ok.dxf --complete
 catia-diff audit examples/sample_ok.dxf --lang tr --out reports
+
+# Üç ortografik görünüş: görünüşler arası çelişki (ve doğru varyantı)
+python examples/generate_sample_drawing.py examples/sample_views.dxf --views
+python examples/generate_sample_drawing.py examples/sample_views_ok.dxf --views --complete
+catia-diff audit examples/sample_views.dxf --lang tr
 
 # ISO 286 geçme sınıfları: sıkı geçme ve kapsam dışı harf
 python examples/generate_sample_drawing.py examples/sample_fits.dxf --fits
@@ -249,8 +277,8 @@ Kayıt otomatiktir; CLI, rapor ve testler kuralı hemen görür.
 ## Geliştirme / Development
 
 ```bash
-pytest -q                      # 352 test, isteğe bağlı bağımlılık yoksa atlanır
-pytest --cov=catia_diff        # ~%90 kapsam
+pytest -q                      # 374 test, isteğe bağlı bağımlılık yoksa atlanır
+pytest --cov=catia_diff        # ~%91 kapsam
 ruff check src tests examples
 ```
 
@@ -260,8 +288,10 @@ katmanıyla doğrulanır.
 
 ## Sınırlar / Known limits
 
-* Görünüşler mekânsal kümelemeyle ayrıştırılır, ancak görünüşler **arası** ilişki
-  kurulmaz: "aynı unsur iki görünüşte farklı ölçülendirilmiş" denetimi henüz yok.
+* Görünüşler arası denetim **hizalamaya** dayanır: ortografik olarak hizalı
+  görünüşlerin paylaştığı toplam uzunluk karşılaştırılır. Unsur düzeyinde eşleme
+  (hangi delik hangi görünüşte hangisine karşılık gelir) yapılmaz; hizasız
+  yerleştirilmiş veya %10'dan fazla ayrışan görünüş çiftleri karşılaştırılmaz.
 * Eksik ölçülendirme analizi **vektör-önce**dir: her ölçünün ölçtüğü aralığı
   bilmeyi gerektirir. DXF bunu verir; PDF metin katmanında ve görsel çıkarımda
   kurallar sessizce çalışmaz (yanlış sonuç üretmek yerine) ve `CON005` durumu bildirir.

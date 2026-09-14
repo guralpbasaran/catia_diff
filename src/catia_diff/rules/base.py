@@ -50,6 +50,8 @@ class RuleContext:
         self._general_tolerance: dict[int, str | None] = {}
         self._general_spec: dict[int, GeneralToleranceSpec | None] = {}
         self._coverage: dict[int, list] = {}
+        self._alignments: dict[int, list] = {}
+        self._inherited: dict[int, dict[str, set[str]]] = {}
         self._blanket: dict[int, frozenset[str]] = {}
 
     # -- cached derivations -------------------------------------------------
@@ -91,6 +93,30 @@ class RuleContext:
 
             self._coverage[sheet.index] = sheet_coverage(sheet, self.config)
         return self._coverage[sheet.index]
+
+    def alignments(self, sheet: Sheet):
+        """View pairs that share a measuring direction, computed once per sheet."""
+        if sheet.index not in self._alignments:
+            from catia_diff.rules.projection import aligned_views
+
+            self._alignments[sheet.index] = aligned_views(sheet, self.config)
+        return self._alignments[sheet.index]
+
+    def inherited_axes(self, sheet: Sheet) -> dict[str, set[str]]:
+        """Axes a view may leave undimensioned because an aligned view fixes them.
+
+        Orthographic practice dimensions a feature once, in the view that shows
+        it best; without this the coverage rules would demand the same
+        dimension again in every aligned view.
+        """
+        if sheet.index not in self._inherited:
+            from catia_diff.rules.projection import inherited_axes
+
+            self._inherited[sheet.index] = inherited_axes(sheet, self.coverage(sheet), self.config)
+        return self._inherited[sheet.index]
+
+    def axis_inherited(self, sheet: Sheet, view, axis_label: str) -> bool:
+        return axis_label in self.inherited_axes(sheet).get(view.id, set())
 
     def blanket_notes(self, sheet: Sheet) -> frozenset[str]:
         """Categories a blanket note already covers ("ALL FILLETS R3")."""
@@ -268,6 +294,7 @@ def _load_rule_modules() -> None:
             return
         from catia_diff.rules import (  # noqa: F401
             consistency,
+            cross_view,
             dimensioning,
             gdt,
             symbols,

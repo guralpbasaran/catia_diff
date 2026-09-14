@@ -263,6 +263,9 @@ def _raw_coordinates(
             continue
         if not feature.points:
             continue
+        if kind == "centerline":
+            out.extend(_centerline_coordinates(feature, axis))
+            continue
         values = [project(point, axis) for point in feature.points]
         if strict:
             out.extend((value, feature.id, kind) for value in values)
@@ -276,6 +279,26 @@ def _raw_coordinates(
             direction = math.degrees(math.atan2(end.y - start.y, end.x - start.x))
             if abs(math.cos(math.radians(direction - axis))) <= PERPENDICULAR_EPS:
                 out.append((project(start, axis), feature.id, kind))
+    return out
+
+
+def _centerline_coordinates(
+    feature: GeometryFeature, axis: float
+) -> list[tuple[float, str, str]]:
+    """The single coordinate a centre line marks, if it marks one on this axis.
+
+    A centre line stands for a position, and how far past the feature it is
+    drawn is draughting style.  Its endpoints are therefore not coordinates a
+    dimension has to reach: only the axis it is perpendicular to gets a node,
+    which is the position it announces.
+    """
+    out: list[tuple[float, str, str]] = []
+    for start, end in zip(feature.points, feature.points[1:], strict=False):
+        if math.hypot(end.x - start.x, end.y - start.y) <= 0:
+            continue
+        direction = math.degrees(math.atan2(end.y - start.y, end.x - start.x))
+        if abs(math.cos(math.radians(direction - axis))) <= PERPENDICULAR_EPS:
+            out.append((project(start, axis), feature.id, "centerline"))
     return out
 
 

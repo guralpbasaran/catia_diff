@@ -183,6 +183,29 @@ bileşen − 1 kopukluk → o kadar eksik ölçü   (DIM011/DIM012)
 Analiz ölçülerin ölçtüğü aralığı gerektirir; DXF bunu verir, raster/vision yolu
 vermez ve kurallar o zaman hiç çalışmaz. Ayrıntı: [`DIMENSION_COVERAGE.md`](DIMENSION_COVERAGE.md).
 
+### Görünüşler arası / Cross-view
+
+Kısıt grafiği tek görünüşün içini görür; `rules/projection.py` görünüşleri
+**birbirine** bağlar. Ortografik yerleşimde üst görünüş ön görünüşün genişliğini,
+yan görünüş yüksekliğini paylaşır: iki görünüşün bbox'ları bir eksende örtüşüp
+diğerinde ayrıksa o eksen **ortaktır**.
+
+Bu tek gerçekten iki sonuç çıkar:
+
+| Sonuç | Nerede kullanılır |
+| --- | --- |
+| Ortak eksen başka görünüşte ölçülendirilmişse burada eksik sayılmaz | `DIM011`, `DIM012`, `DIM014` (miras) |
+| Ortak uzunluk için iki görünüş farklı şey söylüyorsa biri yanlıştır | `CRV001` (ölçüler), `CRV002` (geometri), `CRV003` (tekrar) |
+
+Miras olmadan doğru çizilmiş her çok görünüşlü resim uydurma "eksik ölçü"
+bulgusu üretirdi — bu yüzden iki parça aynı değişikliğin parçasıdır.
+
+Bantlar tahmini değil sınırı tanımlar: ortak uzunluk farkı `%2`'nin altındaysa
+görünüşler aynı, `%2–%10` arasındaysa **aynı olması gerekirken ayrışmış**
+(rapor edilir), `%10`'un üstündeyse farklı şeylerdir (detay, kopuk görünüş,
+başka ölçek) ve ne karşılaştırma ne miras uygulanır. Detay görünüşleri
+(`View.is_detail`) tamamen dışarıda kalır.
+
 ## 7. Çok modlu çıkarım / Multimodal extraction
 
 `llm/` katmanı arka uçtan bağımsızdır:

@@ -162,15 +162,59 @@ Kurallar aşağıdaki hâllerde bulgu üretmez — her biri testlidir:
    Boyut kapsamını `DIM001`/`DIM005` denetler.
 3. **Simetri** yalnızca eksen çizgisi çizilmişse anlaşılır; "ortada" ima edilen ama
    çizilmemiş bir eksen serbest düğüm olarak görünür.
-4. **Görünüşler arası ilişki** kurulmaz: ön görünüşte verilen bir ölçünün yan görünüşü
-   de tanımladığı bilinmez. Aynı unsur iki görünüşte farklı ölçülendirilmişse
-   yakalanmaz.
+4. **Görünüşler arası eşleme unsur düzeyinde yapılmaz.** Hizalı görünüşlerin ortak
+   *toplam* uzunluğu karşılaştırılır (bölüm 7b); hangi deliğin hangi görünüşte
+   hangisine karşılık geldiği çözülmez. Hizasız yerleştirilmiş veya `%10`'dan fazla
+   ayrışan görünüş çiftleri hiç karşılaştırılmaz.
+
+## 7b. Görünüşler arası: hizalama
+
+Tek görünüşün grafiği, o görünüşün dışını göremez. Ortografik yerleşim bir gerçek
+verir: **üst görünüş ön görünüşün genişliğini, yan görünüş yüksekliğini paylaşır.**
+İki görünüşün sınır kutuları bir eksende örtüşüp diğerinde ayrıksa o eksen ortaktır
+(`rules/projection.py`).
+
+Bundan iki şey çıkar. Birincisi bir **yanlış pozitifi kapatır**:
+
+```
+Ön görünüş   X: [0, 12, 68, 80]  3 ölçü → tam
+Üst görünüş  X: [0, 12, 68, 80]  0 ölçü → "3 ölçü eksik"   ← yanlış
+                                          X ön görünüşte verilmiş
+```
+
+Ortografik uygulama bir ölçüyü tek görünüşte verir. Kapsam kuralları artık hizalı
+görünüşten **miras** alır (`DIM011`, `DIM012`, `DIM014`). Miras yalnızca komşu
+görünüş o ekseni **tam** kısıtlıyorsa geçerlidir; kendisi eksik olan bir görünüş
+hiçbir şey devretmez, böylece gerçek bir boşluk iki görünüş arasında kaybolmaz.
+
+İkincisi yeni bir kusur sınıfı açar:
+
+| Kural | Önem | Ne der |
+| --- | --- | --- |
+| `CRV001` | Kritik | İki görünüş ortak uzunluğu farklı ölçülendirmiş (80 ve 76) |
+| `CRV002` | Majör | Ölçüler değil **geometri** ayrışmış — biri güncellenip diğeri unutulmuş |
+| `CRV003` | Minör | Aynı uzunluk iki görünüşte de ölçülendirilmiş (ISO 129-1 §4.3) |
+
+Bantlar kararı verir: fark `%2`'nin altındaysa görünüşler aynı, `%2–%10` arasındaysa
+aynı olması gerekirken ayrışmış (rapor), `%10`'un üstündeyse **farklı şeyler**
+(detay, kopuk görünüş, başka ölçek) — ne karşılaştırılır ne miras alınır. Detay
+görünüşleri baştan dışarıda.
+
+Bir yan etki: merkez çizgisinin *boyu* artık düğüm üretmiyor. Eksen çizgisi bir
+konumu bildirir; parçadan ne kadar taştığı çizim üslubudur, ölçülendirilmesi
+gereken bir koordinat değil.
 
 ## 8. Deneme
 
 ```bash
 # Eksik ölçüyü yakala (örnek resimde gerçek bir kusur var)
 catia-diff audit examples/sample_plate.dxf --lang tr --only DIM011,DIM012
+
+# Görünüşler arası: çelişkili üç görünüş, sonra doğru varyantı (sessiz kalmalı)
+python examples/generate_sample_drawing.py /tmp/views.dxf --views
+catia-diff audit /tmp/views.dxf --lang tr --only CRV001,CRV002,CRV003
+python examples/generate_sample_drawing.py /tmp/views_ok.dxf --views --complete
+catia-diff audit /tmp/views_ok.dxf --lang tr --category cross_view,dimensioning
 
 # Tam ölçülendirilmiş varyant: hiç bulgu üretmemeli
 python examples/generate_sample_drawing.py examples/sample_plate_ok.dxf --complete

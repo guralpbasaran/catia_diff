@@ -506,6 +506,8 @@ class UnlocatedFeatureRule(Rule):
             if _position_controlled(target, view):
                 continue
             for coverage in axes:
+                if ctx.axis_inherited(target, view, coverage.label):
+                    continue  # an aligned view already fixes this axis
                 for group in coverage.unconstrained:
                     features = _node_features(target, group)
                     if not features or _pattern_located(target, view, features):
@@ -563,6 +565,8 @@ class UnconstrainedGeometryRule(Rule):
     def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
         for view, axes in ctx.coverage(target):
             for coverage in axes:
+                if ctx.axis_inherited(target, view, coverage.label):
+                    continue  # an aligned view already fixes this axis
                 for group in coverage.unconstrained:
                     if _node_features(target, group):
                         continue  # DIM011 names the feature instead
@@ -659,6 +663,8 @@ class MissingOverallSizeRule(Rule):
                 extent = coverage.extent
                 if extent is None or not coverage.is_complete() or len(coverage.nodes) < 3:
                     continue
+                if ctx.axis_inherited(target, view, coverage.label):
+                    continue  # the overall size is stated in the aligned view
                 span = extent[1] - extent[0]
                 if span <= 0:
                     continue

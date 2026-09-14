@@ -48,6 +48,7 @@ class DimensioningAgent(RuleAgent):
     accepts = (TaskKind.CHECK_DIMENSIONS,)
     categories = (
         Category.DIMENSIONING,
+        Category.CROSS_VIEW,
         Category.TOLERANCING,
         Category.GDT,
         Category.SYMBOLS,

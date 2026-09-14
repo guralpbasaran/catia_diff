@@ -6,6 +6,7 @@ Run::
     python examples/generate_sample_drawing.py examples/sample_plate_2768.dxf --iso2768
     python examples/generate_sample_drawing.py examples/sample_plate_ok.dxf --complete
     python examples/generate_sample_drawing.py examples/sample_plate_fits.dxf --fits
+    python examples/generate_sample_drawing.py examples/sample_plate_views.dxf --views
 
 The produced sheet is a 80 x 40 plate with four holes and the following
 *intentional* problems, one per rule family:
@@ -62,14 +63,20 @@ def build(
     with_general_tolerance: bool = False,
     complete: bool = False,
     fits: bool = False,
+    views: bool = False,
 ) -> ezdxf.document.Drawing:
     doc = ezdxf.new("R2018", setup=True)
     doc.header["$INSUNITS"] = 4  # millimetres
     doc.header["$LUPREC"] = 2
     msp = doc.modelspace()
-    for name in ("PART", "DIMS", "GDT", "TEXT", "TITLE"):
+    for name in ("PART", "DIMS", "GDT", "TEXT", "TITLE", "CENTER"):
         if name not in doc.layers:
             doc.layers.add(name)
+
+    if views:
+        _multiview_plate(msp, correct=complete)
+        _title_block(doc, msp, complete=True)
+        return doc
 
     if fits:
         _fitted_plate(msp)
@@ -272,6 +279,95 @@ def _complete_plate(msp) -> None:
     )
 
 
+def _multiview_plate(msp, correct: bool = False) -> None:
+    """The plate in three orthographic views, with two cross-view defects.
+
+    The layout is the ordinary one: the top view sits under the front view and
+    shares its width, the side view sits beside it and shares its height.  Each
+    extent is dimensioned once, in the view that shows it best - which is why
+    the top and side views are silent on the axis they inherit, and why a rule
+    that demanded a dimension there would be wrong.
+
+    ==========================  ==================================================
+    Defect                      Expected rule
+    ==========================  ==================================================
+    top view drawn 76 wide      CRV001 aligned views state 80 and 76
+    side view drawn 38 tall     CRV002 aligned geometry differs by 2 mm
+    ==========================  ==================================================
+
+    ``correct=True`` (``--views --complete``) builds the same three views with
+    both defects removed.  That variant is the false-positive net for this
+    family *and* for the coverage rules: a correctly dimensioned multi-view
+    sheet leaves each shared axis dimensioned once, so anything that fires on
+    it is a bug.
+    """
+    style = {"layer": "DIMS"}
+    top_y, depth = -70.0, 20.0
+    top_w = PLATE_W if correct else 76.0  # defect: the front view is 80 wide
+    side_x = 100.0
+    side_h = PLATE_H if correct else 38.0  # defect: the front view is 40 tall
+
+    # -- front view: fully dimensioned ----------------------------------
+    msp.add_lwpolyline(
+        [(0, 0), (PLATE_W, 0), (PLATE_W, PLATE_H), (0, PLATE_H)],
+        close=True,
+        dxfattribs={"layer": "PART"},
+    )
+    for center in HOLES:
+        msp.add_circle(center, HOLE_R, dxfattribs={"layer": "PART"})
+    for base, p1, p2 in (
+        ((0, 52), (0, PLATE_H), (PLATE_W, PLATE_H)),
+        ((0, 44), (0, PLATE_H), (12, PLATE_H)),
+        ((68, 44), (68, PLATE_H), (80, PLATE_H)),
+    ):
+        msp.add_linear_dim(base=base, p1=p1, p2=p2, dxfattribs=style).render()
+    for base, p1, p2 in (
+        ((-22, 0), (0, 0), (0, PLATE_H)),
+        ((-12, 0), (0, 0), (0, 10)),
+        ((-12, 30), (0, 30), (0, PLATE_H)),
+    ):
+        msp.add_linear_dim(base=base, p1=p1, p2=p2, angle=90, dxfattribs=style).render()
+    msp.add_diameter_dim(
+        center=HOLES[0], radius=HOLE_R, angle=135, text="4x %%c6.5", dxfattribs=style
+    ).render()
+
+    # -- top view: aligned on X, dimensions its own (wrong) width -------
+    msp.add_lwpolyline(
+        [(0, top_y), (top_w, top_y), (top_w, top_y + depth), (0, top_y + depth)],
+        close=True,
+        dxfattribs={"layer": "PART"},
+    )
+    for x in (12.0, 68.0):
+        msp.add_line((x, top_y - 4), (x, top_y + depth + 4), dxfattribs={"layer": "CENTER"})
+    msp.add_linear_dim(
+        base=(-22, top_y), p1=(0, top_y), p2=(0, top_y + depth), angle=90, dxfattribs=style
+    ).render()
+    if not correct:
+        # The defect is visible precisely because this view states the width
+        # itself; a correct sheet dimensions that extent once, in the front view.
+        msp.add_linear_dim(
+            base=(0, top_y - 12), p1=(0, top_y), p2=(top_w, top_y), dxfattribs=style
+        ).render()
+
+    # -- side view: aligned on Y, inherits the height it should share ---
+    msp.add_lwpolyline(
+        [(side_x, 0), (side_x + depth, 0), (side_x + depth, side_h), (side_x, side_h)],
+        close=True,
+        dxfattribs={"layer": "PART"},
+    )
+    msp.add_linear_dim(
+        base=(side_x, 52), p1=(side_x, side_h), p2=(side_x + depth, side_h), dxfattribs=style
+    ).render()
+
+    msp.add_mtext(
+        "GENEL TOLERANSLAR ISO 2768-mK\PÖLÇÜLER MM CİNSİNDENDİR\P3. AÇI İZDÜŞÜMÜ",
+        dxfattribs={"layer": "TEXT", "char_height": 2.5},
+    ).set_location((0, 62))
+    msp.add_mtext("√ Ra 3.2", dxfattribs={"layer": "TEXT", "char_height": 3.0}).set_location(
+        (70, 58)
+    )
+
+
 def _title_block(doc: ezdxf.document.Drawing, msp, complete: bool = False) -> None:
     block = doc.blocks.new(name="TITLEBLOCK")
     rows = [
@@ -307,11 +403,18 @@ def main(argv: list[str]) -> int:
     variant = "--iso2768" in flags
     complete = "--complete" in flags
     fits = "--fits" in flags
+    views = "--views" in flags
     target = Path(args[0]) if args else Path("examples/sample_plate.dxf")
     target.parent.mkdir(parents=True, exist_ok=True)
-    build(with_general_tolerance=variant, complete=complete, fits=fits).saveas(target)
+    build(
+        with_general_tolerance=variant, complete=complete, fits=fits, views=views
+    ).saveas(target)
     note = (
-        " (ISO 286 fit classes)"
+        " (three orthographic views, correct)"
+        if views and complete
+        else " (three orthographic views)"
+        if views
+        else " (ISO 286 fit classes)"
         if fits
         else " (fully dimensioned)"
         if complete
