@@ -133,9 +133,11 @@ Claude Vision için kimlik: `export ANTHROPIC_API_KEY=...` (veya `ant auth login
 ## Kullanım / Usage
 
 ```bash
-# Örnek resmi üret (kasıtlı hatalarla) ve denetle
-python examples/generate_sample_drawing.py examples/sample_plate.dxf
+# Örnek resim depoda hazır (kasıtlı hatalarla) - doğrudan denetleyin
 catia-diff audit examples/sample_plate.dxf --lang tr --out reports
+
+# Üreteci yeniden çalıştırmak isterseniz:
+python examples/generate_sample_drawing.py examples/sample_plate.dxf
 
 # ISO 2768-mK notlu varyant: sayısal genel tolerans denetimlerini tetikler
 python examples/generate_sample_drawing.py examples/sample_2768.dxf --iso2768
