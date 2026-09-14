@@ -2,6 +2,7 @@
 
     catia-diff audit part.dxf --profile ISO --lang tr --out reports
     catia-diff rules --lang tr
+    catia-diff ui --port 8050
 """
 
 from __future__ import annotations
@@ -67,6 +68,13 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--quiet", action="store_true", help="only print the summary line")
     audit.add_argument("-v", "--verbose", action="store_true")
 
+    ui = sub.add_parser("ui", help="serve the web dashboard (needs the 'ui' extra)")
+    ui.add_argument("--host", default="127.0.0.1", help="interface to bind")
+    ui.add_argument("--port", type=int, default=8050)
+    ui.add_argument("--profile", choices=[p.value for p in Profile], default=Profile.ISO.value)
+    ui.add_argument("--lang", choices=["tr", "en"], default="tr")
+    ui.add_argument("--debug", action="store_true", help="Dash hot reload and error pages")
+
     rules = sub.add_parser("rules", help="list the rule catalogue")
     rules.add_argument("--profile", choices=[p.value for p in Profile], default=None)
     rules.add_argument("--lang", choices=["tr", "en"], default="en")
@@ -86,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_rules(args)
     if args.command == "formats":
         return _cmd_formats()
+    if args.command == "ui":
+        return _cmd_ui(args)
     return _cmd_audit(args)
 
 
@@ -169,6 +179,27 @@ def _cmd_rules(args: argparse.Namespace) -> int:
             f"{rule.meta.id:8s} {rule.meta.severity.label(lang):8s} "
             f"{rule.meta.category.value:13s} {title}{standards}"
         )
+    return EXIT_OK
+
+
+def _cmd_ui(args: argparse.Namespace) -> int:
+    """Serve the dashboard; blocks until interrupted."""
+    from catia_diff.ui import run as run_ui
+
+    try:
+        print(f"catia-diff dashboard: http://{args.host}:{args.port}  (Ctrl+C to stop)")
+        run_ui(
+            host=args.host,
+            port=args.port,
+            debug=args.debug,
+            language=args.lang,
+            profile=args.profile,
+        )
+    except CatiaDiffError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except KeyboardInterrupt:  # pragma: no cover - interactive
+        pass
     return EXIT_OK
 
 

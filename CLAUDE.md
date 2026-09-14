@@ -24,12 +24,13 @@ Kritik / Majör / Minör / Bilgi.
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[all,dev]"
 
-.venv/bin/python -m pytest            # 316 test
+.venv/bin/python -m pytest            # 352 test
 .venv/bin/python -m pytest --cov=src/catia_diff --cov-report=term-missing
 .venv/bin/ruff check src tests examples
 .venv/bin/mypy src
 
 catia-diff audit examples/sample_plate.dxf --lang tr --out reports
+catia-diff ui --port 8050 --lang tr   # tarayıcı panosu (Dash)
 catia-diff rules --lang tr            # 60 kural
 catia-diff formats
 python examples/generate_sample_drawing.py /tmp/tam.dxf --complete --fits --iso2768
@@ -49,7 +50,8 @@ Testler `conftest.py` üzerinden `src`'i yola ekler; ad hoc betiklerde
 | `models/` | Pydantic v2 alan modeli. Çıkarım ile denetim arasındaki **tek sözleşme** burasıdır. |
 | `rules/` | Kural motoru (`base.py`) + aile başına bir modül. `analysis.py` ve `constraints.py` kural içermez, saf yardımcıdır. |
 | `standards/` | Makine-okunur standart verisi: `iso2768.py` (genel toleranslar), `iso286.py` (limitler ve geçmeler). |
-| `reporting/` | `normalize` (sıralama/tekilleştirme), `render` (JSON/MD/HTML), `overlay` (numaralı kutular). |
+| `reporting/` | `normalize` (sıralama/tekilleştirme), `render` (JSON/MD/HTML), `overlay` (numaralı kutular). Kutu numaraları `normalize.overlay_numbers`'dan gelir; panodaki `No` sütunu da aynı kaynağı okur. |
+| `ui/` | Dash panosu. `service`/`presenters`/`charts`/`theme` Dash'e bağımlı **değildir**; `app.py` yalnızca yerleşim ve bağlantıdır. Geri çağırmalar ince kalır: her biri bir `*_view` fonksiyonuna devreder, test o fonksiyonu çağırır (tarayıcı gerekmez). |
 
 ## Kural eklemek
 
@@ -112,6 +114,12 @@ Bu analiz aralık verisi ister, dolayısıyla **DXF-öncedir**; raster yolda
 5. **Dokümandaki her tablo ve her örnek koddan üretilir**, elle yazılmaz;
    yayımlanmadan önce çalıştırılır.
 6. Negatif sıfır normalize edilir; rapor asla "−0" yazmaz.
+7. **Renk tek yerde, ölçülerek seçilir.** `SEVERITY_COLORS` overlay, HTML rapor
+   ve panoda ortaktır; komşu önem renkleri algısal ayrım eşiğinin (normal ve
+   renk körü görme) üstünde tutulur ve önem her yüzeyde metinle de yazılır —
+   renk tek başına taşıyıcı değildir.
+8. Türkçe metinde CSS `text-transform: uppercase` kullanılmaz (İ/I sorunu);
+   etiketler okunacakları biçimde yazılır.
 
 ## Doküman haritası
 

@@ -198,7 +198,39 @@ vermez ve kurallar o zaman hiç çalışmaz. Ayrıntı: [`DIMENSION_COVERAGE.md`
 * Büyük sayfalar `extract/raster.py` ile döşenir (tile); OpenCV varsa gürültü
   temizleme + eğrilik düzeltme uygulanır, yoksa adım atlanır.
 
-## 8. Tasarım kararları / Design decisions
+## 8. Arayüz katmanı / Dashboard
+
+`ui/` paketi denetime hiçbir şey öğretmez; yalnızca gösterir. Katmanlar:
+
+| Modül | Sorumluluk | Dash'e bağımlı mı |
+| --- | --- | --- |
+| `ui/service.py` | Yüklenen dosyayı çözme, boyut/format denetimi, `Orchestrator`'ı çağırma, raporu indirilebilir metne çevirme | hayır |
+| `ui/presenters.py` | `AuditReport` → ekran modeli (kartlar, satırlar, grafik verisi, kapı durumu), iki dilli etiketler | hayır |
+| `ui/charts.py` | Ekran modeli → Plotly figürü | yalnızca plotly |
+| `ui/theme.py` | Renk/ölçü belirteçleri | hayır |
+| `ui/app.py` | Yerleşim + geri çağırma bağlantıları | evet |
+
+Kural: **geri çağırmalar (callback) ince kalır.** Her biri `*_view` fonksiyonuna
+devreder; bu fonksiyonlar düz değerler alır, düz değerler döndürür ve testten
+doğrudan çağrılır (`tests/test_ui.py`). Bir geri çağırmanın döndürdüğü değer
+sayısının çıktı sayısıyla eşleştiği bile testle doğrulanır — aksi halde hata
+yalnızca tarayıcıda görülür.
+
+Diğer sözleşmeler:
+
+* Yüklenen dosya geçici bir çalışma klasörüne yazılır (`/tmp/catia-diff-ui/…`,
+  son 5 koşu tutulur); rapor dosyaları diske yazılmaz, indirmeler bellekteki
+  rapordan üretilir.
+* Desteklenmeyen uzantı, bozuk base64 veya boyut aşımı **bulgu değil hatadır**:
+  ekran nedenini yazar, tahmin üretmez. Uzantı denetimi gerçek çıkarıcı
+  kayıt defterinden geçer, böylece DWG için CLI ile aynı yönlendirme çıkar.
+* Tablodaki `No` sütunu ile işaretli resimdeki kutu numarası tek kaynaktan
+  gelir (`reporting/normalize.overlay_numbers`), bu yüzden ayrışamazlar.
+* Önem renkleri tek yerde tanımlıdır (`models/findings.SEVERITY_COLORS`) ve
+  overlay, HTML rapor ve pano aynı paleti kullanır; komşu renkler algısal
+  ayrım eşiğinin üstünde tutulur, ayrıca önem her yerde metinle de yazılır.
+
+## 9. Tasarım kararları / Design decisions
 
 | Karar | Gerekçe |
 | --- | --- |

@@ -102,8 +102,8 @@ pip install -e ".[all,dev]"       # veya: pip install -e ".[dxf,pdf,raster,repor
 
 Çekirdek yalnızca `pydantic` ister. İsteğe bağlı ekler:
 `dxf` (ezdxf) · `pdf` (PyMuPDF) · `raster` (Pillow, NumPy) · `cv` (OpenCV) ·
-`llm` (anthropic) · `report` (Jinja2). Eksik olan bir ek yalnızca ilgili yolu
-kapatır, programı durdurmaz.
+`llm` (anthropic) · `report` (Jinja2) · `ui` (Dash, tarayıcı arayüzü). Eksik
+olan bir ek yalnızca ilgili yolu kapatır, programı durdurmaz.
 
 Claude Vision için kimlik: `export ANTHROPIC_API_KEY=...` (veya `ant auth login`).
 
@@ -135,6 +135,9 @@ catia-diff audit part.dxf --profile ASME --min-severity critical --fail-on criti
 # Kural seçimi
 catia-diff audit part.dxf --only DIM001,DIM003
 catia-diff audit part.dxf --disable TOL001 --category gdt,title_block
+
+# Tarayıcı arayüzü
+catia-diff ui --port 8050 --lang tr
 ```
 
 Çıkış kodları: `0` temiz · `1` `--fail-on` eşiğinde bulgu var · `2` dosya
@@ -143,6 +146,34 @@ okunamadı.
 Üretilen dosyalar: `<ad>_audit.json`, `<ad>_audit.md`, `<ad>_audit.html`
 (filtrelenebilir kartlar, açık/koyu tema) ve sayfa başına
 `<ad>_sheetN_overlay.png` (bulgular numaralandırılmış kutularla işaretli).
+
+## Web arayüzü / Dashboard
+
+Komut satırı istemeyenler için aynı denetim tarayıcıda:
+
+```bash
+catia-diff ui                       # http://127.0.0.1:8050
+catia-diff ui --port 8080 --lang en --profile ASME
+```
+
+![catia-diff panosu](docs/images/dashboard.png)
+
+Resmi sürükleyip bırakın (ya da **Örnek resmi dene** ile başlayın); sayfa şunu
+verir:
+
+* **Serbest bırakma kararı** — seçtiğiniz eşiğe göre, CLI'ın çıkış koduyla aynı
+  mantık: *"4 bulgu eşiği aşıyor — serbest bırakmayın (çıkış kodu 1)"*.
+* **Önem kartları** ve kategori başına yığılmış çubuk — hangi aile yanıyor.
+* **Bulgu tablosu** — önem/kategori filtreli; bir satıra tıklayınca altında
+  bulgunun tamamı: mesaj, önerilen düzeltme, standart maddesi, güven ve
+  **resimdeki kutu numarası**.
+* **İşaretli resim** sekmesi — numaralı kutular tablodaki `No` ile birebir aynı.
+* **Belge** sekmesi — çıkarılan nesne sayıları, süre, uyarılar.
+* **Raporu indir** — JSON · Markdown · HTML, komut satırındakiyle aynı dosyalar.
+
+Dil anahtarı denetimi yeniden çalıştırmaz: bulgular modelde zaten iki dillidir,
+sayfa yalnızca dili değiştirir. Sunucu yereldir; vektörel dosyalarda hiçbir veri
+makineden çıkmaz.
 
 ### Python API
 
@@ -218,13 +249,14 @@ Kayıt otomatiktir; CLI, rapor ve testler kuralı hemen görür.
 ## Geliştirme / Development
 
 ```bash
-pytest -q                      # 316 test, isteğe bağlı bağımlılık yoksa atlanır
+pytest -q                      # 352 test, isteğe bağlı bağımlılık yoksa atlanır
 pytest --cov=catia_diff        # ~%90 kapsam
 ruff check src tests examples
 ```
 
-Testler ağ erişimi gerektirmez: Claude çağrıları `MockVisionModel` ve sahte bir
-istemci ile doğrulanır.
+Testler ağ erişimi ve tarayıcı gerektirmez: Claude çağrıları `MockVisionModel`
+ve sahte bir istemci ile, pano ise Dash'e bağımlı olmayan sunum/servis
+katmanıyla doğrulanır.
 
 ## Sınırlar / Known limits
 
@@ -236,6 +268,9 @@ istemci ile doğrulanır.
 * Unsur–ölçü eşleştirmesi ve kapalı zincir (raster yolda) sezgiseldir;
   bulgular `confidence < 1.0` ile işaretlenir.
 * DWG doğrudan okunmaz.
+* Pano yerel ve tek kullanıcılıktır: kimlik doğrulama, oturum ve kalıcı depolama
+  yoktur, yüklenen dosya geçici klasöre yazılır (son 5 koşu tutulur). Ağa açmak
+  için önüne kimlik denetimi yapan bir vekil sunucu koyun.
 * ISO 286 kapsamı kısmidir: miller `d e f g h js k m n p`, dereceler IT5–IT14,
   ölçüler 0,5–500 mm. Dışında kalan her gösterim çözülmez ve `TOL011` ile
   raporlanır — sessizce tahmin üretilmez.
