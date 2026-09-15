@@ -230,6 +230,6 @@ def test_the_committed_sample_drawing_still_carries_its_defects(config):
 
     report = Orchestrator(config).audit(sample)
     found = {finding.rule_id for finding in report.findings}
-    assert {"DIM004", "DIM011", "GDT001", "TOL002"} <= found
-    assert report.counts_by_severity()[Severity.CRITICAL] == 4
+    assert {"DIM004", "DIM011", "DIM016", "GDT001", "TOL002"} <= found
+    assert report.counts_by_severity()[Severity.CRITICAL] == 5
     assert report.document_stats["dimensions"] == 9

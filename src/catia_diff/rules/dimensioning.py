@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
+import re
 from collections.abc import Iterable
 
-from catia_diff.extract.text_parsing import BLANKET_RADII
+from catia_diff.extract.text_parsing import BLANKET_CHAMFERS, BLANKET_RADII, parse_thickness
 from catia_diff.models.drawing import (
     DimensionKind,
     GDTCharacteristic,
@@ -17,8 +19,21 @@ from catia_diff.models.findings import Category, Finding, Severity
 from catia_diff.rules import analysis
 from catia_diff.rules.base import Rule, RuleContext, RuleMeta, register
 from catia_diff.rules.constraints import AxisCoverage, ReferenceNode
+from catia_diff.rules.patterns import CHAMFER_RATIO, BoltCircle, chamfer_edges
 
 AGENT = "dimensioning"
+
+#: A chamfer callout as it is usually written: "1x45°", "6 X 45", "C1".  Drawings
+#: place these as leader text at least as often as as a dimension entity.
+_CHAMFER_CALLOUT_RE = re.compile(
+    r"\d+(?:[.,]\d+)?\s*[xX×]\s*\d+(?:[.,]\d+)?\s*°?|(?<![A-Za-z])C\s*\d+(?:[.,]\d+)?",
+)
+
+#: A pitch circle named rather than measured: "PCD 90", "DELİK DAİRESİ ⌀90".
+_PCD_RE = re.compile(
+    r"\b(PCD|BCD|BOLT\s*CIRCLE|DEL[İI]K\s*DA[İI]RES[İI]|DELIK\s*CAPI)\b",
+    re.IGNORECASE,
+)
 
 
 @register
@@ -470,6 +485,16 @@ def _pattern_located(sheet: Sheet, view: View, features: list[GeometryFeature]) 
     return False
 
 
+def _on_a_bolt_circle(ctx: RuleContext, sheet: Sheet) -> set[str]:
+    """Holes that belong to a pitch circle: their position is `DIM017`'s subject."""
+    return {
+        feature_id
+        for _view, circles in ctx.bolt_circles(sheet)
+        for circle in circles
+        for feature_id in circle.feature_ids
+    }
+
+
 def _node_features(sheet: Sheet, nodes: list[ReferenceNode]) -> list[GeometryFeature]:
     out: list[GeometryFeature] = []
     for node in nodes:
@@ -512,6 +537,9 @@ class UnlocatedFeatureRule(Rule):
                     features = _node_features(target, group)
                     if not features or _pattern_located(target, view, features):
                         continue
+                    features = [f for f in features if f.id not in _on_a_bolt_circle(ctx, target)]
+                    if not features:
+                        continue  # DIM017 names the pitch circle they belong to
                     yield self._finding(target, view, coverage, group, features)
 
     def _finding(self, sheet, view, coverage: AxisCoverage, group, features) -> Finding:
@@ -772,3 +800,248 @@ class ObliqueEdgeWithoutAngleRule(Rule):
                 confidence=0.6,
                 agent=AGENT,
             )
+
+
+# ---------------------------------------------------------------------------
+# Completeness classes the per-axis graph cannot see
+# ---------------------------------------------------------------------------
+def _states_thickness(sheet: Sheet) -> bool:
+    """True when the sheet writes the thickness down somewhere."""
+    if parse_thickness(sheet.notes_text()) is not None:
+        return True
+    for annotation in sheet.annotations:
+        if parse_thickness(annotation.text) is not None:
+            return True
+    return any(
+        parse_thickness(field.value) is not None
+        for field in sheet.title_block.fields.values()
+        if field.value
+    )
+
+
+def _is_turned_part(sheet: Sheet, view: View) -> bool:
+    """True when a diameter already defines the body across one axis.
+
+    A shaft drawn in one view is a rectangle carrying '⌀25': its third dimension
+    is the diameter, not a thickness.  A round plate is the opposite case - its
+    outline *is* the circle - so it still needs one.
+    """
+    box = view.bbox
+    if box is None:
+        return False
+    members = set(view.member_ids)
+    if any(
+        feature.kind is GeometryKind.CIRCLE
+        and feature.id in members
+        and feature.radius
+        and abs(feature.radius * 2 - max(box.width, box.height)) <= max(box.width, box.height) * 0.02
+        for feature in sheet.features
+    ):
+        return False  # the outline itself is the circle: a face view, not a shaft
+    for dim in sheet.dimensions:
+        if dim.id not in members or dim.nominal is None or dim.prefix not in {"⌀", "R"}:
+            continue
+        for side in (box.width, box.height):
+            if side > 0 and abs(dim.nominal - side) <= side * 0.01:
+                return True
+    return False
+
+
+@register
+class MissingThicknessRule(Rule):
+    meta = RuleMeta(
+        id="DIM016",
+        title="Single view without a thickness",
+        title_tr="Kalınlığı verilmemiş tek görünüş",
+        severity=Severity.CRITICAL,
+        category=Category.DIMENSIONING,
+        standards=("ISO 129-1 §4.1", "ASME Y14.5-2018 §1.4"),
+        description=(
+            "One view shows two of the part's three dimensions; unless the third "
+            "is written down, the part cannot be made."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        views = [view for view in target.views if view.is_geometric]
+        if len(views) != 1 or not target.dimensions:
+            return
+        view = views[0]
+        if _states_thickness(target) or _is_turned_part(target, view):
+            return
+        yield self.finding(
+            message=(
+                "The part is drawn in a single view and no thickness is stated - in a note, "
+                "in the material field or as a second view."
+            ),
+            message_tr=(
+                "Parça tek görünüşte çizilmiş ve kalınlık hiçbir yerde belirtilmemiş: ne notta, "
+                "ne malzeme alanında, ne de ikinci bir görünüşte."
+            ),
+            suggestion="State the thickness ('KALINLIK 5', 't=5') or add a side view.",
+            suggestion_tr="Kalınlığı yazın ('KALINLIK 5', 't=5') ya da bir yan görünüş ekleyin.",
+            sheet_index=target.index,
+            bbox=view.bbox,
+            object_ids=[view.id],
+            confidence=0.85,
+            agent=AGENT,
+        )
+
+
+def _pcd_stated(sheet: Sheet, view: View, circle: BoltCircle) -> bool:
+    """True when the drawing states the pitch circle, by value or by name."""
+    members = set(view.member_ids)
+    tolerance = max(circle.diameter * 1e-3, 1e-6)
+    for dim in sheet.dimensions:
+        if dim.id not in members:
+            continue
+        if dim.nominal is not None and abs(dim.nominal - circle.diameter) <= tolerance:
+            return True
+        if _PCD_RE.search(dim.text or ""):
+            return True
+    return any(_PCD_RE.search(annotation.text) for annotation in sheet.annotations)
+
+
+def _bolt_circle_located(ctx: RuleContext, sheet: Sheet, view: View, circle: BoltCircle) -> bool:
+    """True when ordinary dimensions already reach every hole of the group.
+
+    Without interval data nothing can be established, and the rule stays out of
+    it rather than guessing.
+    """
+    coverage = [axes for member, axes in ctx.coverage(sheet) if member.id == view.id]
+    if not coverage:
+        return True
+    free: set[str] = set()
+    for axes in coverage:
+        for axis in axes:
+            for group in axis.unconstrained:
+                for node in group:
+                    free.update(node.feature_ids)
+    return not free.intersection(circle.feature_ids)
+
+
+@register
+class UndimensionedBoltCircleRule(Rule):
+    meta = RuleMeta(
+        id="DIM017",
+        title="Bolt circle without its pitch circle diameter",
+        title_tr="Çapı verilmemiş delik dairesi",
+        severity=Severity.MAJOR,
+        category=Category.DIMENSIONING,
+        standards=("ISO 129-1 §6.5", "ASME Y14.5-2018 §1.8"),
+        description=(
+            "Holes spaced around a centre are located by the pitch circle and the "
+            "spacing, not by coordinates; without the PCD they have no position."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        for view, circles in ctx.bolt_circles(target):
+            for circle in circles:
+                if _pcd_stated(target, view, circle) or _bolt_circle_located(
+                    ctx, target, view, circle
+                ):
+                    continue
+                yield self.finding(
+                    message=(
+                        f"{circle.count} × ⌀{circle.hole_radius * 2:g} holes sit evenly on a "
+                        f"circle of ⌀{circle.diameter:g} about "
+                        f"({circle.center.x:.1f}, {circle.center.y:.1f}), but that pitch circle "
+                        "is never dimensioned."
+                    ),
+                    message_tr=(
+                        f"{circle.count} adet ⌀{circle.hole_radius * 2:g} delik, "
+                        f"({circle.center.x:.1f}, {circle.center.y:.1f}) merkezli "
+                        f"⌀{circle.diameter:g} bir çember üzerinde eşit aralıklı duruyor ancak "
+                        "bu delik dairesi ölçülendirilmemiş."
+                    ),
+                    suggestion=(
+                        f"Dimension the pitch circle (⌀{circle.diameter:g}) and state the spacing."
+                    ),
+                    suggestion_tr=(
+                        f"Delik dairesini (⌀{circle.diameter:g}) ölçülendirin ve bölüntüyü yazın."
+                    ),
+                    sheet_index=target.index,
+                    bbox=view.bbox,
+                    object_ids=list(circle.feature_ids),
+                    confidence=0.9,
+                    agent=AGENT,
+                )
+
+
+@register
+class UndimensionedChamferRule(Rule):
+    meta = RuleMeta(
+        id="DIM018",
+        title="Chamfer without a size",
+        title_tr="Ölçüsü verilmemiş pah",
+        severity=Severity.MINOR,
+        category=Category.DIMENSIONING,
+        standards=("ISO 129-1 §9", "ASME Y14.5-2018 §3.3.4"),
+        description=(
+            "A broken corner is dimensioned as a leg and an angle ('1x45°') or "
+            "covered by a blanket note; its two ends are not enough."
+        ),
+    )
+
+    def check(self, target: Sheet, ctx: RuleContext) -> Iterable[Finding]:
+        if BLANKET_CHAMFERS in ctx.blanket_notes(target):
+            return
+        for view in target.views:
+            if not view.is_geometric or view.bbox is None:
+                continue
+            size = max(view.bbox.width, view.bbox.height)
+            members = set(view.member_ids)
+            features = [f for f in target.features if f.id in members]
+            edges = [
+                edge
+                for edge in chamfer_edges(features, size * CHAMFER_RATIO)
+                if not _chamfer_dimensioned(target, members, edge, size)
+            ]
+            if not edges:
+                continue
+            positions = ", ".join(
+                f"({(edge.start.x + edge.end.x) / 2:.1f}, {(edge.start.y + edge.end.y) / 2:.1f})"
+                for edge in edges[:3]
+            )
+            yield self.finding(
+                message=(
+                    f"{len(edges)} broken corner(s) at {positions} carry neither a size nor a "
+                    "blanket note."
+                ),
+                message_tr=(
+                    f"{positions} konumundaki {len(edges)} pah ne ölçülendirilmiş ne de bir "
+                    "blanket notla kapsanmış."
+                ),
+                suggestion="Dimension them ('1x45°') or add a note such as 'TÜM PAHLAR 1x45°'.",
+                suggestion_tr="Ölçülendirin ('1x45°') ya da 'TÜM PAHLAR 1x45°' notunu ekleyin.",
+                sheet_index=target.index,
+                bbox=view.bbox,
+                object_ids=sorted({edge.feature_id for edge in edges}),
+                confidence=0.8,
+                agent=AGENT,
+            )
+
+
+def _chamfer_dimensioned(sheet: Sheet, members: set[str], edge, size: float) -> bool:
+    """True when a callout sits close enough to the edge to be about it.
+
+    A chamfer is called out as a dimension ("1x45°") or, just as often, as
+    leader text beside the corner; both count.
+    """
+    midpoint = ((edge.start.x + edge.end.x) / 2, (edge.start.y + edge.end.y) / 2)
+    reach = size * 0.15
+
+    def near(box) -> bool:
+        centre = box.center
+        return math.hypot(centre.x - midpoint[0], centre.y - midpoint[1]) <= reach
+
+    for dim in sheet.dimensions:
+        if dim.id in members and dim.bbox is not None and near(dim.bbox):
+            return True
+    return any(
+        annotation.bbox is not None
+        and near(annotation.bbox)
+        and _CHAMFER_CALLOUT_RE.search(annotation.text or "")
+        for annotation in sheet.annotations
+    )

@@ -136,6 +136,33 @@ Bu ikinci durum, eski bitişik-zincir sezgiselinin **göremediği** bir kusurdu:
 "küçük ölçülerin toplamı büyük ölçüye eşit mi" diye bakıyordu, iki uzunluğunda
 çevrim ise toplam içermez.
 
+## 5b. Grafiğin göremediği üç eksik
+
+Kısıt grafiği **eksen başına** çalışır. Üç eksik sınıfı bu çerçevenin dışındadır
+ve ayrı kurallardadır:
+
+| Kural | Önem | Neden grafik göremez |
+| --- | --- | --- |
+| `DIM016` | Kritik | Kalınlık sayfa düzleminde bir eksen değildir: tek görünüş iki boyutu gösterir, üçüncüsü yazıyla verilir |
+| `DIM017` | Majör | Delik dairesi **polar** bir referanstır; kartezyen eksenlerde "bu merkezlere ölçü ulaşmıyor" doğru ama işe yaramaz bir ifadedir |
+| `DIM018` | Minör | Pah, iki ucunun koordinatıyla değil bacak + açı ile verilir; grafikte uçları bağlı görünebilir |
+
+Üçünün de tanımı dar tutulmuştur:
+
+* **Delik dairesi** = eş yarıçaplı, çembersel **ve eşit açısal bölüntülü** ≥3
+  delik. Örnek levhanın dikdörtgen desenindeki dört delik de çember üzerindedir
+  ama eşit bölüntülü değildir; onları x/y ölçüleri konumlandırır ve `DIM011`
+  sahiplenir. `DIM011`, delik dairesine ait deliklerde susar — kusur "iki ölçü
+  eksik" değil, "bir delik dairesi eksik"tir.
+* **Kalınlık** yalnızca tek görünüşlü sayfada aranır ve çapıyla tanımlanan
+  parçalarda (şaft) aranmaz. Aranma biçimi geniştir: `KALINLIK 5`, `t=5`,
+  `THK 5`, `5 mm SAC`, antet malzeme alanı.
+* **Pah** = görünüş boyunun `%10`'undan kısa eğik kenar. Daha uzun eğik kenar
+  şekildir; onun açısını `DIM015` ister. Yakınındaki `1x45°` biçimli kılavuz
+  metni de ölçü sayılır — resimlerde pah çoğu kez ölçü nesnesi değil metindir.
+* `DIM017` aralık verisi olmayan kaynakta **hiç çalışmaz**: deliklerin başka
+  ölçülerle konumlanıp konumlanmadığı kanıtlanamaz.
+
 ## 6. Sessiz kalması gereken durumlar
 
 Kurallar aşağıdaki hâllerde bulgu üretmez — her biri testlidir:
@@ -149,6 +176,9 @@ Kurallar aşağıdaki hâllerde bulgu üretmez — her biri testlidir:
 | Eğik kenar kendi ekseninde ölçülmüş | Açı zaten tanımlı |
 | Kısa pah kenarları (`< %10` görünüş boyu) | Açı beklenmez |
 | Antet köşesindeki tek nesne | Görünüş değil, antet çerçevesi |
+| Kalınlık notta/antette yazılı | `DIM016` susar |
+| Delik dairesi çapı verilmiş (sayı ya da "DELİK DAİRESİ") | `DIM017` susar |
+| Pah yanında `1x45°` metni veya blanket pah notu | `DIM018` susar |
 
 ## 7. Sınırlar
 
