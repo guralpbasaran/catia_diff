@@ -183,9 +183,10 @@ Kurallar aşağıdaki hâllerde bulgu üretmez — her biri testlidir:
 ## 7. Sınırlar
 
 1. **Vektör-önce.** Analiz, her ölçünün ölçtüğü aralığı bilmeyi gerektirir. DXF bunu
-   verir (`_measurement_interval`, ordinate ölçüler dâhil). PDF metin katmanında ve
-   görsel çıkarımda bu veri yoktur; **eksik** ölçü kuralları o zaman hiç çalışmaz
-   (sessizce yanlış sonuç üretmek yerine) ve `CON005` durumu bildirir.
+   dosyadan verir (`_measurement_interval`, ordinate ölçüler dâhil); vektörel PDF'te
+   aynı veri sayfadan geri kazanılır (bölüm 7c). Taranmış sayfada ve görsel çıkarımda
+   bu veri yoktur; **eksik** ölçü kuralları o zaman hiç çalışmaz (sessizce yanlış
+   sonuç üretmek yerine) ve `CON005` durumu bildirir.
    `DIM003`/`TOL010` ise bu kaynaklarda daha zayıf bir yola düşer: aynı hizadaki
    gösterimlerin toplamını karşılaştırır ve bulguyu `%60` güvenle işaretler.
 2. **Çap/yarıçap/açı ölçüleri** boyutu kısıtlar, konumu değil; grafiğe girmezler.
@@ -234,11 +235,57 @@ Bir yan etki: merkez çizgisinin *boyu* artık düğüm üretmiyor. Eksen çizgi
 konumu bildirir; parçadan ne kadar taştığı çizim üslubudur, ölçülendirilmesi
 gereken bir koordinat değil.
 
+## 7c. Vektörel PDF: grafiği sayfadan geri kazanmak
+
+DXF bir ölçüyü nesne olarak verir: neyi ölçtüğü dosyada yazar. PDF vermez. Bir CAD
+çıktısında **ölçü diye bir şey yoktur** — boyanmış yollar ve bir metin katmanı vardır,
+üstelik milimetre de yoktur, sayfada punto vardır. `extract/pdf_vector.py` aradaki
+farkı üç adımda kapatır:
+
+1. **Düzleştir.** Her yol düz parçalara ve dairelere iner (`l`, `re`, `qu` ve dört
+   ardışık Bézier = daire).
+2. **Ölçü çizgilerini sahiplen.** Bir ölçü, iki ok ucu ve iki uzatma çizgisiyle
+   çizilmiş, yanında sayısı yazan eksenel bir çizgidir. Metin kutusuna en yakın
+   eksenel çizgi o ölçünün çizgisidir; ok uçları ve uzatma çizgileri onunla birlikte
+   **tüketilir**. Sahiplenme ölçmek kadar önemlidir: geride bırakılan bir uzatma
+   çizgisi, parçanın sahip olmadığı bir kenar olur ve grafiğe uydurma bir düğüm
+   sokar.
+3. **Ölçekle.** Sayfa 240 punto derken resim `80.00` diyorsa bir punto milimetrenin
+   üçte biridir. Oran eşleşen **her** ölçüden alınır ve medyanla indirgenir.
+
+Medyan bir tercih değil, bir savunmadır: üstü yazılmış tek bir ölçü ölçeği kaydıramaz,
+aykırı değer olarak kalır — ki zaten odur. `%5`'ten fazla sapan bir eşleşme
+`is_text_override` ile işaretlenir; bu, DXF yolunun dosyadan okuduğu kusurun
+(`DIM004`, "ölçü 25 yazıyor ama geometri 30") PDF'teki karşılığıdır.
+
+Tahmin yok: çizgisi bulunamayan ölçü aralık taşımaz (yalnızca kılavuz çizgili
+`4x ⌀6.5` gibi notlar böyledir ve öyle kalmalıdır), en az iki ölçü eşleşmediyse
+ölçek **türetilmez** — sayfa puntoda bırakılır, kapsam kuralları çalışmaz ve neden
+çalışmadığı sayfa uyarısı olarak yazılır.
+
+Bir ayrıntı daha: antet **çerçevesi** parça geometrisi değildir. İçeriği alan olarak
+zaten okunmuştur; dikdörtgeni geride kalırsa kendi başına bir görünüşe kümelenir ve
+"hiç ölçüsü yok" diye raporlanır. Bu yüzden antet bölgesinin **tamamen** içinde kalan
+çizgiler elenir — köşeye uzanan gerçek bir görünüş elenmesin diye, kısmen örtüşen
+değil.
+
+Kabul ölçütü ve kanıtı: `examples/sample_plate.pdf`, `examples/sample_plate.dxf` ile
+aynı levhadır ve denetlendiğinde aynı kusurları verir — iki `DIM011` (delik sıraları
+Y ekseninde konumlandırılmamış), `DIM003` + `TOL010` (12 + 56 + 12 ve 80 aynı mesafeyi
+iki kez kısıtlıyor) — ölçek de tam `1/3` mm/punto çıkar. `--complete` varyantı aynı
+çizgileri taşır, yalnızca dizilişi doğrudur: kapsam kurallarından **hiç** bulgu
+üretmez. Sessizlik ağı bu fazın zor yarısıdır.
+
 ## 8. Deneme
 
 ```bash
 # Eksik ölçüyü yakala (örnek resimde gerçek bir kusur var)
 catia-diff audit examples/sample_plate.dxf --lang tr --only DIM011,DIM012
+
+# Aynı levha, bir CAD çıktısı olarak: aynı bulgular, bu kez çizgilerden
+catia-diff audit examples/sample_plate.pdf --lang tr --only DIM011,DIM012,DIM003
+python examples/generate_sample_pdf.py /tmp/ok.pdf --complete
+catia-diff audit /tmp/ok.pdf --lang tr --category dimensioning   # sessiz
 
 # Görünüşler arası: çelişkili üç görünüş, sonra doğru varyantı (sessiz kalmalı)
 python examples/generate_sample_drawing.py /tmp/views.dxf --views

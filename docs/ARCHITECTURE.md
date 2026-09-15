@@ -106,6 +106,36 @@ Her bulgu iki dillidir (TR + EN); rapor dili çalışma zamanında seçilir.
 `confidence` sezgisel kuralları dürüstçe işaretler (örn. ölçü–unsur eşleştirmesi
 0.7, kapalı zincir sezgiseli 0.6).
 
+## 3b. Vektör geri kazanımı / Vector recovery (PDF)
+
+DXF bir ölçüyü nesne olarak verir; PDF vermez. Bir CAD çıktısında boyanmış yollar
+ve bir metin katmanı vardır — ölçü nesnesi de, milimetre de yoktur. `extract/
+pdf_vector.py` modeli bu ikisinden kurar ve **sırası önemlidir**: ölçü çizgileri
+sahiplenilene kadar her uzatma çizgisi parçanın bir kenarı gibi görünür.
+
+```
+page.get_drawings()
+    │ flatten()               yollar → Segment + Circle (punto)
+    ▼
+claim_dimension_lines()       metin kutusuna en yakın eksenel çizgi = o ölçünün
+    │                         çizgisi; ok uçları + uzatma çizgileri tüketilir
+    │                         → Match(axis, interval, consumed)
+    ▼
+calibrate()                   medyan(nominal / açıklık) → mm/punto
+    │                         < 2 eşleşme → None (sayfa puntoda kalır, uyarı)
+    ▼
+apply_matches() → rescale()   ölçüler aralıklarını alır, sayfa milimetreye geçer
+    │                         %5'ten sapan eşleşme → is_text_override
+    ▼
+features_from()               sahiplenilmemiş her şey parça geometrisidir
+```
+
+Böylece kısıt grafiği (`rules/constraints.py`) vektörel PDF'te de çalışır: DIM011
+ve DIM012 artık yalnızca DXF kuralları değildir. Antet **çerçevesi** geometriden
+elenir — tamamen antet bölgesinin içinde kalan çizgiler, köşeye uzanan gerçek bir
+görünüş elenmesin diye. Ayrıntı: [`DIMENSION_COVERAGE.md`](DIMENSION_COVERAGE.md)
+bölüm 7c.
+
 ## 4. Kural motoru / Rule engine
 
 Bir kural = bir sınıf:

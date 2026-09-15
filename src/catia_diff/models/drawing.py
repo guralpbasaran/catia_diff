@@ -439,6 +439,10 @@ class Sheet(BaseModel):
     #: set by the extractors when a page carries no usable text/vector layer
     needs_vision: bool = False
     text_char_count: int = 0
+    #: what the extractor learned about this page while reading it (the derived
+    #: page scale, how many dimensions it could match) - diagnostics, not data
+    #: the rules depend on
+    metadata: dict[str, str] = Field(default_factory=dict)
 
     title_block: TitleBlock = Field(default_factory=TitleBlock)
     views: list[View] = Field(default_factory=list)

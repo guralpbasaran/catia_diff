@@ -219,6 +219,12 @@ catia-diff audit examples/sample_views.dxf --lang tr
 python examples/generate_sample_drawing.py examples/sample_fits.dxf --fits
 catia-diff audit examples/sample_fits.dxf --lang tr --out reports
 
+# Vektörel PDF: aynı levha, bir CAD çıktısı olarak. Sayfada ölçü nesnesi yok,
+# yalnızca çizgi var - aynı DIM011/DIM003 bulguları çizgilerden geri kazanılır
+catia-diff audit examples/sample_plate.pdf --lang tr --out reports
+python examples/generate_sample_pdf.py examples/sample_plate_ok.pdf --complete
+catia-diff audit examples/sample_plate_ok.pdf --lang tr   # kapsam kuralları sessiz
+
 # Taranmış PDF: metin katmanı yoksa otomatik olarak Claude Vision devreye girer
 catia-diff audit tarama.pdf --vision auto --dpi 300
 
@@ -288,7 +294,7 @@ for finding in report.by_severity(Severity.CRITICAL):
 | Biçim | Yol | Ne elde edilir |
 | --- | --- | --- |
 | **DXF** | `ezdxf` | En yüksek doğruluk: ölçüler gerçek ölçülen değerle birlikte gelir, tolerans üstünü yazma (text override) tespit edilebilir, antet blok öznitelikleriyle okunur |
-| **PDF (vektörel)** | `PyMuPDF` | Metin aralıkları + vektör geometrisi; çoğu CAD çıktısı bu gruba girer |
+| **PDF (vektörel)** | `PyMuPDF` | Metin aralıkları + vektör geometrisi. Sayfada ölçü *nesnesi* yoktur, yalnızca çizgi vardır: `extract/pdf_vector.py` ölçü çizgilerini sahiplenir, her ölçünün ölçtüğü aralığı ve sayfanın ölçeğini geri kazanır — kapsam kuralları bu yolda da çalışır. Çoğu CAD çıktısı bu gruba girer |
 | **PDF (taranmış) / PNG, JPG, TIFF** | raster → Claude Vision | Sayfa temizlenir, döşenir, yapılandırılmış çıktı ile yazıya dökülür |
 | **DWG** | — | Kapalı biçim: önce DXF'e çevirin (`ODAFileConverter <in> <out> ACAD2018 DXF 0 1`) |
 
@@ -296,6 +302,11 @@ for finding in report.by_severity(Severity.CRITICAL):
 > hatalar yalnızca ölçünün gerçek değerinin bilindiği vektörel girdide
 > yakalanabilir. Raster yol tam bir yedektir, eşdeğeri değildir — bu yüzden
 > görsel çıkarım yapılmayan taranmış sayfa `CON005` ile ayrıca raporlanır.
+>
+> Vektörel PDF'te ölçek de resmin kendi ölçülerinden türetilir: sayfa 240 punto
+> derken resim 80 diyorsa bir punto milimetrenin üçte biridir. Oran her eşleşen
+> ölçüden alınıp **medyanla** indirgenir; böylece üstü yazılmış tek bir ölçü
+> ölçeği kaydıramaz, aykırı değer olarak kalır — ki zaten odur.
 
 ## Mimari / Architecture
 
@@ -347,7 +358,7 @@ Kayıt otomatiktir; CLI, rapor ve testler kuralı hemen görür.
 ## Geliştirme / Development
 
 ```bash
-pytest -q                      # 446 test, isteğe bağlı bağımlılık yoksa atlanır
+pytest -q                      # 464 test, isteğe bağlı bağımlılık yoksa atlanır
 pytest --cov=catia_diff        # ~%91 kapsam
 ruff check src tests examples run_ui.py
 ```
@@ -363,8 +374,11 @@ katmanıyla doğrulanır.
   (hangi delik hangi görünüşte hangisine karşılık gelir) yapılmaz; hizasız
   yerleştirilmiş veya %10'dan fazla ayrışan görünüş çiftleri karşılaştırılmaz.
 * Eksik ölçülendirme analizi **vektör-önce**dir: her ölçünün ölçtüğü aralığı
-  bilmeyi gerektirir. DXF bunu verir; PDF metin katmanında ve görsel çıkarımda
-  kurallar sessizce çalışmaz (yanlış sonuç üretmek yerine) ve `CON005` durumu bildirir.
+  bilmeyi gerektirir. DXF bunu dosyadan verir, vektörel PDF'te sayfadan geri
+  kazanılır (ölçü çizgisi + ölçek); taranmış sayfada ve görsel çıkarımda böyle bir
+  veri yoktur, kurallar sessizce çalışmaz (yanlış sonuç üretmek yerine) ve `CON005`
+  durumu bildirir. Vektörel PDF'te ölçek yeterli ölçüden türetilemezse sayfa
+  puntoda bırakılır ve bu da sayfa uyarısı olarak yazılır.
 * Unsur–ölçü eşleştirmesi ve kapalı zincir (raster yolda) sezgiseldir;
   bulgular `confidence < 1.0` ile işaretlenir.
 * Referans denetimi **tanınabilen** işaretlerle sınırlıdır: kesit düzlemi harf
