@@ -24,7 +24,7 @@ Kritik / Majör / Minör / Bilgi.
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[all,dev]"
 
-.venv/bin/python -m pytest            # 446 test
+.venv/bin/python -m pytest            # 464 test
 .venv/bin/python -m pytest --cov=src/catia_diff --cov-report=term-missing
 .venv/bin/ruff check src tests examples run_ui.py
 .venv/bin/mypy src
@@ -35,6 +35,7 @@ python run_ui.py                      # aynı pano, IDE'den tek tık (parametres
 catia-diff rules --lang tr            # 73 kural
 catia-diff formats
 python examples/generate_sample_drawing.py /tmp/tam.dxf --complete --fits --iso2768
+python examples/generate_sample_pdf.py /tmp/tam.pdf --complete   # vektörel PDF
 ```
 
 `.venv/bin/python` kullanın: sistem Python'ında paket kurulu değildir.
@@ -46,7 +47,7 @@ Testler `conftest.py` üzerinden `src`'i yola ekler; ad hoc betiklerde
 | Yol | Sorumluluk |
 | --- | --- |
 | `agents/` | Orkestratör + ajanlar (`extraction`, `dimensioning`, `title_block`, `consistency`, `report`). Ajanlar arası protokol `models/messages.py`'deki `AgentTask` / `AgentResult` zarflarıdır; hata her ajanda yalıtılır, biri düşerse denetim sürer. Denetleyici ajanlar `ThreadPoolExecutor` ile paralel koşar (`--sequential` kapatır). |
-| `extract/` | Format başına çıkarıcı + `registry`. Ortak metin grameri `text_parsing.py`'dedir — **her kaynak (DXF/PDF/Vision) aynı gramerden geçer.** |
+| `extract/` | Format başına çıkarıcı + `registry`. Ortak metin grameri `text_parsing.py`'dedir — **her kaynak (DXF/PDF/Vision) aynı gramerden geçer.** `pdf_vector.py` bir PDF sayfasından ölçü aralıklarını ve ölçeği geri kazanır; sırası pazarlık dışıdır (bkz. aşağıda). |
 | `llm/` | Claude soyutlaması: `base.VisionClient` arayüzü, `anthropic_client`, testler için `mock`. Kural kodu Anthropic SDK'sını doğrudan görmez. |
 | `models/` | Pydantic v2 alan modeli. Çıkarım ile denetim arasındaki **tek sözleşme** burasıdır. |
 | `rules/` | Kural motoru (`base.py`) + aile başına bir modül. `analysis.py`, `constraints.py`, `projection.py`, `markers.py` ve `patterns.py` kural içermez, saf yardımcıdır. |
@@ -109,8 +110,17 @@ karşılaştırılmaz: aynı şeyi gösterdikleri kanıtlanamaz.
 
 Görünüş ayrıştırma (`rules/views.py`) **çıkarım sırasında bir kez** koşar; paralel
 denetleyicilerle yarış olmaması için bunu kural içine taşımayın.
-Bu analiz aralık verisi ister, dolayısıyla **DXF-öncedir**; raster yolda
+Bu analiz aralık verisi ister, dolayısıyla **vektör-öncedir**; raster yolda
 çalıştırılmaz ve raporda nedeni yazılır (`CON005`).
+
+Vektörel PDF'te bu veri dosyada yoktur, sayfadan geri kazanılır
+(`extract/pdf_vector.py`) ve **adım sırası pazarlık dışıdır**: önce ölçü çizgileri
+sahiplenilir (ok uçları ve uzatma çizgileriyle birlikte tüketilir), sonra ölçek
+medyanla türetilir, en son kalan her şey parça geometrisi sayılır. Sahiplenme
+atlanırsa uzatma çizgileri parçanın olmayan kenarları olur. İki ölçü eşleşmediyse
+ölçek **türetilmez**: sayfa puntoda kalır, kapsam kuralları çalışmaz, nedeni sayfa
+uyarısına yazılır. Antet çerçevesi geometriden elenir — ama yalnızca tamamen antet
+bölgesinin içindeyse.
 
 ## Referans bütünlüğü (sembolik referanslar)
 
@@ -155,7 +165,7 @@ numarası → not, sayfa numarası → sayfa. Çözümleme **belge genelindedir*
 | --- | --- |
 | `README.md` | Ne bulur, kurulum, hızlı başlangıç |
 | `docs/ARCHITECTURE.md` | Ajan protokolü, veri akışı, genişletme noktaları |
-| `docs/DIMENSION_COVERAGE.md` | Kısıt grafiği modeli, örnek üzerinde adım adım çözüm |
+| `docs/DIMENSION_COVERAGE.md` | Kısıt grafiği modeli, örnek üzerinde adım adım çözüm, PDF'ten vektör geri kazanımı (§7c) |
 | `docs/ISO2768.md` | Genel tolerans tabloları ve sayısal denetim kapsamı |
 | `docs/ISO286.md` | IT dereceleri, temel sapmalar, geçme karakteri, kapsam sınırları |
 | `docs/REFERENCES.md` | Bildirim/kullanım modeli, işaret tespiti, yedi kural, kapı kuralı |

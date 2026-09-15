@@ -216,6 +216,30 @@ def sample_dxf_refs_correct(tmp_path_factory) -> Path:
     return target
 
 
+def _pdf_builder():
+    pytest.importorskip("pymupdf")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
+    from generate_sample_pdf import build  # noqa: PLC0415
+
+    return build
+
+
+@pytest.fixture(scope="session")
+def sample_pdf(tmp_path_factory) -> Path:
+    """The same plate as a CAD-exported vector PDF, with the same defects."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_sample.pdf"
+    _pdf_builder()().save(target)
+    return target
+
+
+@pytest.fixture(scope="session")
+def sample_pdf_complete(tmp_path_factory) -> Path:
+    """The same page, dimensioned - the vector PDF false-positive net."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_complete.pdf"
+    _pdf_builder()(complete=True).save(target)
+    return target
+
+
 @pytest.fixture(scope="session")
 def sample_dxf_iso2768(tmp_path_factory) -> Path:
     """The same drawing plus an ISO 2768-mK note and the defects it exposes."""

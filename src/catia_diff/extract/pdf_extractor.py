@@ -9,11 +9,13 @@ them to Claude Vision.
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 from typing import Any
 
 from catia_diff.config import AuditConfig
 from catia_diff.errors import ExtractionError, MissingDependencyError
+from catia_diff.extract import pdf_vector
 from catia_diff.extract.base import SourceExtractor
 from catia_diff.extract.text_parsing import (
     classify_annotation,
@@ -24,10 +26,11 @@ from catia_diff.extract.text_parsing import (
     parse_dimension_text,
     parse_feature_control_frame,
     parse_surface_finish,
+    parse_thickness,
     parse_weld_symbol,
     to_float,
 )
-from catia_diff.extract.title_block_scan import TextItem, scan_title_block
+from catia_diff.extract.title_block_scan import TextItem, scan_title_block, title_block_region
 from catia_diff.fields import canonical_field
 from catia_diff.models.drawing import (
     Annotation,
@@ -37,8 +40,6 @@ from catia_diff.models.drawing import (
     DimensionKind,
     DrawingDocument,
     GeometricTolerance,
-    GeometryFeature,
-    GeometryKind,
     ProjectionMethod,
     Sheet,
     SourceFormat,
@@ -124,9 +125,51 @@ class PdfExtractor(SourceExtractor):
             CoordinateSpace.Y_DOWN,
         )
         self._parse_lines(sheet, lines, config, consumed=_title_block_boxes(sheet))
-        self._parse_geometry(sheet, drawings)
+        self._recover_vectors(sheet, drawings)
         _post_process(sheet)
         return sheet
+
+    # ------------------------------------------------------------------
+    def _recover_vectors(self, sheet: Sheet, drawings: list[dict[str, Any]]) -> None:
+        """Geometry, measured intervals and the page scale, in that order.
+
+        The order is the point: until the dimension lines are claimed, every
+        extension line looks like an edge of the part.
+        """
+        segments, circles = pdf_vector.flatten(drawings)
+        # The title block's own frame is not part geometry: its content was read
+        # as fields already, and its rectangle would otherwise cluster into a
+        # view of its own and be reported as undimensioned.  Only strokes that
+        # lie *entirely* within the region go: a view that reaches into the
+        # corner is still a view.
+        if sheet.title_block.detected:
+            region = title_block_region(sheet.bbox, sheet.coordinate_space)
+            segments = [item for item in segments if not region.contains(_span(item))]
+            circles = [item for item in circles if not region.contains(_disc(item))]
+        if not segments and not circles:
+            return
+        matches = pdf_vector.claim_dimension_lines(sheet.dimensions, segments)
+        mm_per_point = pdf_vector.calibrate(matches)
+        pdf_vector.apply_matches(matches, mm_per_point)
+
+        claimed: set[int] = set()
+        for match in matches:
+            claimed |= match.consumed
+        next_feature = self.id_factory("FEAT")
+        sheet.features.extend(
+            pdf_vector.features_from(segments, circles, claimed, next_feature)
+        )
+
+        if mm_per_point is None:
+            sheet.warnings.append(
+                "the page scale could not be derived from its dimensions - lengths stay in "
+                "points and the dimensional coverage rules do not run"
+            )
+            return
+        pdf_vector.rescale(sheet, mm_per_point)
+        sheet.units = Units.MM
+        sheet.metadata["mm_per_point"] = f"{mm_per_point:.6f}"
+        sheet.metadata["dimensions_matched"] = f"{len(matches)}/{len(sheet.dimensions)}"
 
     # ------------------------------------------------------------------
     def _parse_lines(
@@ -279,30 +322,6 @@ class PdfExtractor(SourceExtractor):
                 )
             )
 
-    def _parse_geometry(self, sheet: Sheet, drawings: list[dict[str, Any]]) -> None:
-        next_feature = self.id_factory("FEAT")
-        for path in drawings:
-            rect = path.get("rect")
-            if rect is None:
-                continue
-            box = BBox(x0=rect.x0, y0=rect.y0, x1=rect.x1, y1=rect.y1)
-            items = path.get("items", [])
-            curves = [item for item in items if item and item[0] == "c"]
-            if len(curves) >= 4 and box.width > 0 and box.height > 0:
-                ratio = box.width / box.height
-                if 0.9 <= ratio <= 1.1:  # four beziers in a square box => circle
-                    sheet.features.append(
-                        GeometryFeature(
-                            id=next_feature(),
-                            kind=GeometryKind.CIRCLE,
-                            center=box.center,
-                            radius=(box.width + box.height) / 4.0,
-                            closed=True,
-                            bbox=box,
-                            confidence=0.7,
-                        )
-                    )
-
 
 # --------------------------------------------------------------------------
 # PDF helpers
@@ -345,6 +364,12 @@ def _safe_drawings(page: Any) -> list[dict[str, Any]]:
 
 _NUMERIC_ONLY = ("0", "1", "2", "3", "4", "5", "6", "7", "8", "9")
 
+#: Four letters or more in a row - long enough to be a word rather than a symbol.
+_WORD_RE = re.compile(r"[^\W\d_]{4,}", re.UNICODE)
+
+#: The words a dimension callout is still allowed to carry at that length.
+_DIMENSION_WORDS = frozenset({"THRU", "DEEP", "DERIN", "TYPE", "ADET", "PLCS", "BOTH"})
+
 
 def _looks_like_dimension(text: str) -> bool:
     """Reject prose that happens to contain a number (notes, labels, dates)."""
@@ -354,6 +379,16 @@ def _looks_like_dimension(text: str) -> bool:
     if sum(ch.isalpha() for ch in stripped) > 12:
         return False
     if not any(ch in stripped for ch in _NUMERIC_ONLY):
+        return False
+    # "KALINLIK 5" states the material thickness; it is a note that DIM016 reads,
+    # not a 5 mm dimension.  The DXF path gets this for free because MTEXT lands
+    # in annotations - on a PDF page every string is a candidate, so the shared
+    # grammar has to make the call.
+    if parse_thickness(stripped) is not None:
+        return False
+    # Letters inside a callout come in short tokens: a prefix (M, R, SQ), a fit
+    # (H7/g6), a multiplier (4x), a qualifier (REF).  A longer word is prose.
+    if any(word.upper() not in _DIMENSION_WORDS for word in _WORD_RE.findall(stripped)):
         return False
     # "MATERIAL: S235JR" is a title-block cell, not a 235 mm dimension.
     label, _, _ = stripped.partition(":")
@@ -365,6 +400,24 @@ def _looks_like_dimension(text: str) -> bool:
     if stripped.count("/") >= 2:
         return False
     return not (not toleranced and (stripped.count("-") >= 2 or stripped.count(".") >= 2))
+
+
+def _span(segment: Any) -> BBox:
+    return BBox(
+        x0=min(segment.start.x, segment.end.x),
+        y0=min(segment.start.y, segment.end.y),
+        x1=max(segment.start.x, segment.end.x),
+        y1=max(segment.start.y, segment.end.y),
+    )
+
+
+def _disc(circle: Any) -> BBox:
+    return BBox(
+        x0=circle.center.x - circle.radius,
+        y0=circle.center.y - circle.radius,
+        x1=circle.center.x + circle.radius,
+        y1=circle.center.y + circle.radius,
+    )
 
 
 def _title_block_boxes(sheet: Sheet) -> list[BBox]:
