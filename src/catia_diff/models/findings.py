@@ -172,6 +172,73 @@ class Finding(BaseModel):
         return (self.severity.rank, self.evidence.sheet_index, self.rule_id, self.id)
 
 
+class CoverageGap(BaseModel):
+    """One dimension the drawing does not have, and where it would run.
+
+    The overlay draws it as a dashed line: from a coordinate the drawing already
+    controls to the one it leaves free.  That is the most direct way to say what
+    is missing - the reader sees the dimension that should be there.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    #: The free coordinate, projected onto the axis.
+    coordinate: float
+    #: The nearest coordinate the view already controls, or ``None`` when the
+    #: view constrains nothing at all on this axis.
+    anchor: float | None = None
+    #: The free geometry, so the line can be drawn beside it.
+    bbox: BBox | None = None
+    #: The features sitting on the free coordinate - the same ids the finding
+    #: carries, which is how the two layers are kept in step.
+    feature_ids: tuple[str, ...] = ()
+
+
+class AxisCoverage(BaseModel):
+    """How well one view is dimensioned along one measuring direction."""
+
+    model_config = ConfigDict(frozen=True)
+
+    #: "X", "Y" or the angle of an oblique measuring direction.
+    axis: str
+    #: The missing dimensions the audit reported; ``len`` is the shortfall.
+    gaps: tuple[CoverageGap, ...] = ()
+    #: Dimensions more than this axis needs - each one closes a cycle.
+    redundant: int = 0
+    #: True when an orthographically aligned view already fixes this axis, so
+    #: nothing is missing here even if this view alone does not constrain it.
+    inherited: bool = False
+
+    @property
+    def missing(self) -> int:
+        return len(self.gaps)
+
+    @property
+    def is_complete(self) -> bool:
+        return not self.gaps and not self.redundant
+
+
+class ViewCoverage(BaseModel):
+    """Dimensional coverage of one view, axis by axis."""
+
+    model_config = ConfigDict(frozen=True)
+
+    sheet_index: int = 0
+    view_id: str
+    label: str | None = None
+    axes: tuple[AxisCoverage, ...] = ()
+
+    @property
+    def is_complete(self) -> bool:
+        return all(axis.is_complete for axis in self.axes)
+
+    def name(self, lang: str = "en") -> str:
+        if self.label:
+            return self.label
+        number = self.view_id.removeprefix("VIEW").lstrip("0") or self.view_id
+        return f"Görünüş {number}" if lang == "tr" else f"View {number}"
+
+
 class AuditReport(BaseModel):
     """Aggregated result of one audit run."""
 
@@ -187,6 +254,9 @@ class AuditReport(BaseModel):
     overlays: list[Path] = Field(default_factory=list)
     rules_executed: int = 0
     duration_ms: float = 0.0
+    #: Constraint-graph coverage per view - the same numbers the overlay draws
+    #: and the HTML table prints, derived once.
+    coverage: list[ViewCoverage] = Field(default_factory=list)
     #: True when the file could not be read at all - an empty finding list
     #: then means "not audited", not "clean".
     extraction_failed: bool = False

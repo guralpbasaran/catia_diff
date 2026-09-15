@@ -276,6 +276,46 @@ iki kez kısıtlıyor) — ölçek de tam `1/3` mm/punto çıkar. `--complete` v
 çizgileri taşır, yalnızca dizilişi doğrudur: kapsam kurallarından **hiç** bulgu
 üretmez. Sessizlik ağı bu fazın zor yarısıdır.
 
+## 7d. Raporlama: eksik ölçüyü göstermek
+
+Bir kutunun yanında "Y ekseninde konumlandırılmamış" yazması sorunun *var* olduğunu
+söyler; **hangi ölçünün** çizilmesi gerektiğini söylemez. Overlay artık onu çiziyor:
+resmin zaten kısıtladığı en yakın koordinattan serbest unsura uzanan **kesikli bir
+çizgi**, iki ucunda çentik ve ortasında eksen rozeti (`X` / `Y`). Kılavuz, bulguyu
+raporlayan kuralın önem rengini alır; lejantta da adı yazar ("eksik ölçü"), çünkü
+teknik resimde kesikli çizginin zaten bir anlamı var (gizli kenar) ve tahmine
+bırakılamaz.
+
+Aynı veri üç yüzeyde birden görünür ve **tek yerden** gelir
+(`reporting/coverage.py`): overlay'deki kılavuz, HTML/Markdown raporundaki kapsam
+tablosu, ve `document_stats` içindeki `unconstrained_axes` sayacı. Ayrı ayrı
+türetilselerdi er geç birbirleriyle çelişirlerdi.
+
+Kritik tasarım kararı şu: **özet ham grafikten değil, bulgulardan süzülerek
+üretilir.** Grafik bir düğümü serbest görüp de kural susuyorsa (delik dairesindeki
+delikler — `DIM017` zaten çapı adlandırıyor; ya da komşu görünüşten miras alınan
+bir eksen) tabloda da overlay'de de boşluk **görünmez**. Kendi kendisiyle çelişen
+bir rapor, az şey söyleyen bir rapordan kötüdür.
+
+Miras eksen bu yüzden ayrı yazılır. Üç görünüşlü örnekte grafik, VIEW02'nin Y
+eksenini ve VIEW03'ün X eksenini serbest görür; ikisi de komşu görünüşte
+ölçülendirilmiştir ve kurallar haklı olarak susar:
+
+| Görünüş | Durum |
+| --- | --- |
+| Görünüş 1 | X ✔ · Y ✔ |
+| Görünüş 2 | X ✔ · Y ✔ (komşu görünüşten) |
+| Görünüş 3 | X ✔ (komşu görünüşten) · Y ✔ |
+
+Örnek levhada ise iki kusur da tabloda görünür:
+
+| Görünüş | Durum |
+| --- | --- |
+| Görünüş 1 | X: 1 fazla · Y: 1 eksik |
+
+`unconstrained_axes` yalnızca **eksik** eksenleri sayar: fazla ölçü başka bir
+kusurdur, ekseni serbest bırakmaz.
+
 ## 8. Deneme
 
 ```bash
@@ -284,6 +324,11 @@ catia-diff audit examples/sample_plate.dxf --lang tr --only DIM011,DIM012
 
 # Aynı levha, bir CAD çıktısı olarak: aynı bulgular, bu kez çizgilerden
 catia-diff audit examples/sample_plate.pdf --lang tr --only DIM011,DIM012,DIM003
+
+# Kapsam tablosu ve eksik ölçü kılavuzu: raporda ve işaretli PNG'de
+catia-diff audit examples/sample_plate.dxf --lang tr --out reports
+#   reports/sample_plate_audit.md  -> "Ölçülendirme kapsamı" tablosu
+#   reports/..._overlay.png        -> serbest delik sırasından alt kenara kesikli Y çizgisi
 python examples/generate_sample_pdf.py /tmp/ok.pdf --complete
 catia-diff audit /tmp/ok.pdf --lang tr --category dimensioning   # sessiz
 

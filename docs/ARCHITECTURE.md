@@ -278,6 +278,29 @@ düğümü üretir ne de görünüşün sınırını genişletir. Ayrıntı:
 * Büyük sayfalar `extract/raster.py` ile döşenir (tile); OpenCV varsa gürültü
   temizleme + eğrilik düzeltme uygulanır, yoksa adım atlanır.
 
+## 7b. Raporlama katmanı / Reporting
+
+`reporting/` denetime hiçbir şey öğretmez; bulguları yazar. İçinde **iki tek-kaynak
+kuralı** var, ikisi de aynı nedenle: birden çok yüzey aynı soruyu cevaplıyor ve ayrı
+türetselerdi er geç ayrışırlardı.
+
+| Türetme | Kaynak | Okuyanlar |
+| --- | --- | --- |
+| Kutu numaraları | `normalize.overlay_numbers` | overlay PNG, panodaki `No` sütunu |
+| Ölçülendirme kapsamı | `coverage.summarize_coverage` | overlay kılavuz çizgisi, HTML/MD kapsam tablosu, `document_stats["unconstrained_axes"]` |
+
+Kapsam özeti rapor ajanında **bir kez** üretilir ve `AuditReport.coverage` üzerinde
+taşınır (`ViewCoverage` → `AxisCoverage` → `CoverageGap`). Kritik olan, neyin
+kaynak alındığıdır: özet ham kısıt grafiğinden değil, **bulgulardan süzülerek**
+kurulur. Grafiğin serbest gördüğü ama kuralın sustuğu bir düğüm rapora boşluk
+olarak geçmez; eşleştirme unsur kimlikleri üzerinden yapılır, geometri yakınlığıyla
+değil. Ayrıntı ve gerekçe: [`DIMENSION_COVERAGE.md`](DIMENSION_COVERAGE.md) §7d.
+
+Overlay'in bir yazı tipi sorunu da burada çözülür: Pillow'un gömülü yüzü Türkçe
+glifleri taşımaz ve "Majör"ü `Maj□r` diye basar. `overlay.FONT_CANDIDATES` sistemde
+gerçek bir yüz arar; hiçbiri yoksa etiket ASCII'ye çevrilir. Boş kutu hiçbir zaman
+doğru cevap değildir.
+
 ## 8. Arayüz katmanı / Dashboard
 
 `ui/` paketi denetime hiçbir şey öğretmez; yalnızca gösterir. Katmanlar:

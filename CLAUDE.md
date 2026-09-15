@@ -24,7 +24,7 @@ Kritik / Majör / Minör / Bilgi.
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[all,dev]"
 
-.venv/bin/python -m pytest            # 464 test
+.venv/bin/python -m pytest            # 479 test
 .venv/bin/python -m pytest --cov=src/catia_diff --cov-report=term-missing
 .venv/bin/ruff check src tests examples run_ui.py
 .venv/bin/mypy src
@@ -52,7 +52,7 @@ Testler `conftest.py` üzerinden `src`'i yola ekler; ad hoc betiklerde
 | `models/` | Pydantic v2 alan modeli. Çıkarım ile denetim arasındaki **tek sözleşme** burasıdır. |
 | `rules/` | Kural motoru (`base.py`) + aile başına bir modül. `analysis.py`, `constraints.py`, `projection.py`, `markers.py` ve `patterns.py` kural içermez, saf yardımcıdır. |
 | `standards/` | Makine-okunur standart verisi: `iso2768.py` (genel toleranslar), `iso286.py` (limitler ve geçmeler). |
-| `reporting/` | `normalize` (sıralama/tekilleştirme), `render` (JSON/MD/HTML), `overlay` (numaralı kutular). Kutu numaraları `normalize.overlay_numbers`'dan gelir; panodaki `No` sütunu da aynı kaynağı okur. |
+| `reporting/` | `normalize` (sıralama/tekilleştirme), `render` (JSON/MD/HTML), `overlay` (numaralı kutular), `coverage` (görünüş başına kapsam özeti). İki tek-kaynak kuralı: kutu numaraları `normalize.overlay_numbers`'dan gelir (panodaki `No` sütunu da aynı kaynağı okur), kapsam ise `coverage.summarize_coverage`'dan — overlay'deki kesikli çizgi, HTML/MD tablosu ve `unconstrained_axes` sayacı hep onu okur. |
 | `ui/` | Dash panosu. `service`/`presenters`/`charts`/`theme` Dash'e bağımlı **değildir**; `app.py` yalnızca yerleşim ve bağlantıdır. Geri çağırmalar ince kalır: her biri bir `*_view` fonksiyonuna devreder, test o fonksiyonu çağırır (tarayıcı gerekmez). |
 
 ## Kural eklemek
@@ -149,6 +149,10 @@ numarası → not, sayfa numarası → sayfa. Çözümleme **belge genelindedir*
    kuralından hesaplanır; ikinci bir tablo ikinci bir hata kaynağıdır.
 4. **Yanlış pozitif = güven kaybı.** `--complete` örnek varyantı kapsam
    kurallarından **hiç** bulgu üretmemelidir; regresyon testi budur.
+   Rapor da kendi bulgularıyla çelişmez: kapsam özeti ham grafikten değil,
+   **bulgulardan süzülerek** üretilir (`reporting/coverage.py`). Grafiğin serbest
+   gördüğü ama kuralın sustuğu bir düğüm (delik dairesi, miras eksen) tabloda da
+   overlay'de de boşluk olarak görünmez.
 5. **Dokümandaki her tablo ve her örnek koddan üretilir**, elle yazılmaz;
    yayımlanmadan önce çalıştırılır.
 6. Negatif sıfır normalize edilir; rapor asla "−0" yazmaz.
@@ -157,7 +161,10 @@ numarası → not, sayfa numarası → sayfa. Çözümleme **belge genelindedir*
    renk körü görme) üstünde tutulur ve önem her yüzeyde metinle de yazılır —
    renk tek başına taşıyıcı değildir.
 8. Türkçe metinde CSS `text-transform: uppercase` kullanılmaz (İ/I sorunu);
-   etiketler okunacakları biçimde yazılır.
+   etiketler okunacakları biçimde yazılır. Overlay PNG'sinde ise sorun yazı
+   tipidir: Pillow'un gömülü yüzü Türkçe glifleri taşımaz ve boş kutu basar.
+   `overlay.FONT_CANDIDATES` gerçek bir yüz arar, bulamazsa etiketi ASCII'ye
+   çevirir — kutu asla doğru cevap değildir.
 
 ## Doküman haritası
 

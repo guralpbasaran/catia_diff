@@ -108,6 +108,7 @@ STAT_LABELS: dict[str, dict[str, str]] = {
     "features": {"tr": "Unsur", "en": "Features"},
     "outline_entities": {"tr": "Kontur", "en": "Outline entities"},
     "views": {"tr": "Görünüş", "en": "Views"},
+    "unconstrained_axes": {"tr": "Eksik kısıtlı eksen", "en": "Unconstrained axes"},
 }
 
 

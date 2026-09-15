@@ -358,7 +358,7 @@ Kayıt otomatiktir; CLI, rapor ve testler kuralı hemen görür.
 ## Geliştirme / Development
 
 ```bash
-pytest -q                      # 464 test, isteğe bağlı bağımlılık yoksa atlanır
+pytest -q                      # 479 test, isteğe bağlı bağımlılık yoksa atlanır
 pytest --cov=catia_diff        # ~%91 kapsam
 ruff check src tests examples run_ui.py
 ```
