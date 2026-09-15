@@ -35,6 +35,9 @@
   code { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.85em; }
   details { margin-top:1rem; } summary { cursor:pointer; color:var(--muted); }
   .empty { padding:2rem; text-align:center; border:1px dashed var(--line); border-radius:10px; color:var(--muted); }
+  /* A view with nothing missing recedes; the state is written out either way,
+     so no severity colour is claimed for a gap that may be critical or major. */
+  .coverage tr.ok th, .coverage tr.ok td { color:var(--muted); }
 </style>
 </head>
 <body>
@@ -90,6 +93,18 @@
     {% for key, value in stats.items() %}<tr><th>{{ key }}</th><td>{{ value }}</td></tr>{% endfor %}
     </tbody>
   </table>
+
+  {% if coverage %}
+  <h2>{{ coverage_text.heading }}</h2>
+  <table class="coverage">
+    <thead><tr><th>{{ coverage_text.view }}</th><th>{{ coverage_text.state }}</th></tr></thead>
+    <tbody>
+    {% for row in coverage %}
+      <tr class="{{ 'ok' if row.complete else 'gap' }}"><th>{{ row.view }}</th><td>{{ row.state }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 
   {% if warnings %}
   <details open>

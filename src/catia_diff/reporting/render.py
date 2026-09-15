@@ -8,6 +8,7 @@ from pathlib import Path
 
 from catia_diff.config import AuditConfig
 from catia_diff.models.findings import SEVERITY_COLORS, AuditReport, Finding, Severity
+from catia_diff.reporting.coverage import coverage_rows, coverage_text
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -72,6 +73,8 @@ def to_markdown(report: AuditReport, lang: str = "en") -> str:
     if stats:
         lines.extend([f"## {t['extracted']}", "", stats, ""])
 
+    lines.extend(_markdown_coverage(report, lang))
+
     for severity in Severity:
         group = report.by_severity(severity)
         if not group:
@@ -88,6 +91,18 @@ def to_markdown(report: AuditReport, lang: str = "en") -> str:
         lines.extend(f"- {warning}" for warning in report.warnings)
         lines.append("")
     return "\n".join(lines)
+
+
+def _markdown_coverage(report: AuditReport, lang: str) -> list[str]:
+    """Per-view coverage, so the report says what is dimensioned, not only what is wrong."""
+    rows = coverage_rows(report.coverage, lang)
+    if not rows:
+        return []
+    c = coverage_text(lang)
+    lines = [f"## {c['heading']}", "", f"| {c['view']} | {c['state']} |", "| --- | --- |"]
+    lines.extend(f"| {name} | {state} |" for name, state, _ in rows)
+    lines.append("")
+    return lines
 
 
 def _markdown_finding(finding: Finding, lang: str, t: dict[str, str]) -> list[str]:
@@ -172,6 +187,11 @@ def _html_context(report: AuditReport, lang: str) -> dict:
         ],
         "findings": rows,
         "stats": report.document_stats,
+        "coverage": [
+            {"view": name, "state": state, "complete": complete}
+            for name, state, complete in coverage_rows(report.coverage, lang)
+        ],
+        "coverage_text": coverage_text(lang),
         "overlays": [str(path.name) for path in report.overlays],
         "warnings": report.warnings,
         "traces": report.agent_traces,
@@ -210,6 +230,17 @@ def _fallback_html(context: dict) -> str:
             f"<td>{esc(row['suggestion'])}</td><td>{row['sheet']}</td></tr>"
         )
     parts.append("</table>")
+    if context["coverage"]:
+        c = context["coverage_text"]
+        parts.append(
+            f"<h2>{esc(c['heading'])}</h2><table>"
+            f"<tr><th>{esc(c['view'])}</th><th>{esc(c['state'])}</th></tr>"
+        )
+        parts.extend(
+            f"<tr><th>{esc(row['view'])}</th><td>{esc(row['state'])}</td></tr>"
+            for row in context["coverage"]
+        )
+        parts.append("</table>")
     for overlay in context["overlays"]:
         parts.append(f"<h2>{esc(t['overlays'])}</h2><img src='{esc(overlay)}' style='max-width:100%'>")
     parts.append("</body></html>")

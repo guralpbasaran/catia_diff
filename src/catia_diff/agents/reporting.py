@@ -8,6 +8,7 @@ from pathlib import Path
 from catia_diff.agents.base import Agent, AuditContext
 from catia_diff.models.findings import AuditReport, Finding
 from catia_diff.models.messages import AgentResult, AgentStatus, AgentTask, TaskKind
+from catia_diff.reporting.coverage import summarize_coverage, unconstrained_axes
 from catia_diff.reporting.normalize import normalize_findings
 from catia_diff.reporting.overlay import render_overlays
 from catia_diff.reporting.render import write_reports
@@ -23,6 +24,11 @@ class ReportAgent(Agent):
         document = ctx.require_document()
         raw: list[Finding] = list(task.payload.get("findings", []))
         findings = normalize_findings(raw, ctx.config)
+        # Derived once here, then read by the overlay, the HTML table and the
+        # stats - three surfaces that must not disagree about what is missing.
+        coverage = summarize_coverage(document, findings, ctx.config)
+        stats = document.counts()
+        stats["unconstrained_axes"] = unconstrained_axes(coverage)
 
         report = AuditReport(
             document=document.source_path,
@@ -30,7 +36,8 @@ class ReportAgent(Agent):
             profile=ctx.config.profile.value,
             language=ctx.config.language,
             findings=findings,
-            document_stats=document.counts(),
+            document_stats=stats,
+            coverage=coverage,
             warnings=list(document.warnings),
             rules_executed=int(task.payload.get("rules_executed", 0)),
             # Traces of the agents that ran before this one; the orchestrator
