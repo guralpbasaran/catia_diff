@@ -875,3 +875,49 @@ def view_references(raw: str | None) -> set[tuple[str, str]]:
             label = f"{label}-{label}"
         out.add((kind, label))
     return out
+
+
+# --------------------------------------------------------------------------
+# Thickness: the dimension a single view cannot show
+# --------------------------------------------------------------------------
+#: "t=5", "t5", "KALINLIK 5", "ET KALINLIĞI 5 mm", "THK 5", "5 mm SAC".
+_THICKNESS_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        # KALINLIK / KALINLIĞI / KALINLIGI, with or without the "ET" prefix.
+        rf"(?:ET\s+)?KALINLI[KĞG]I?\s*[:=]?\s*({_NUM})|"
+        rf"TH(?:K|ICKNESS)\s*[:=]?\s*({_NUM})",
+        re.IGNORECASE,
+    ),
+    re.compile(rf"(?<![A-Za-z])t\s*[:=]\s*({_NUM})", re.IGNORECASE),
+    re.compile(rf"(?<![A-Za-z0-9])t({_NUM})(?![A-Za-z0-9])"),
+    # The material and its thickness, written in either order:
+    # "5 mm SAC" and "PLAKA 8" both state the same thing.
+    re.compile(
+        rf"({_NUM})\s*(?:mm)?\s*(?:KALINLI[ĞG]INDA\s+)?(?:SAC|PLAKA|LEVHA|SHEET|PLATE)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"(?:SAC|PLAKA|LEVHA|SHEET|PLATE)\s*[:=]?\s*({_NUM})\s*(?:mm)?(?![\d.,])",
+        re.IGNORECASE,
+    ),
+)
+
+
+def parse_thickness(raw: str | None) -> float | None:
+    """The material thickness a note or a title block field states, if any.
+
+    A single view shows two dimensions of the part; the third has to be written
+    down somewhere or the part cannot be made.
+    """
+    text = normalize_drawing_text(raw)
+    if not text:
+        return None
+    for pattern in _THICKNESS_RES:
+        match = pattern.search(text)
+        if not match:
+            continue
+        for group in match.groups():
+            value = to_float(group)
+            if value is not None and value > 0:
+                return value
+    return None

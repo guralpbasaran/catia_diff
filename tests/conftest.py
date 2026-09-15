@@ -185,6 +185,22 @@ def sample_dxf_views_correct(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def sample_dxf_flange(tmp_path_factory) -> Path:
+    """A flange missing its thickness, its pitch circle and its chamfer size."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_flange.dxf"
+    _sample_builder()(flange=True).saveas(target)
+    return target
+
+
+@pytest.fixture(scope="session")
+def sample_dxf_flange_correct(tmp_path_factory) -> Path:
+    """The same flange with all three stated - the silence net for DIM016-DIM018."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_flange_ok.dxf"
+    _sample_builder()(flange=True, complete=True).saveas(target)
+    return target
+
+
+@pytest.fixture(scope="session")
 def sample_dxf_refs(tmp_path_factory) -> Path:
     """A plate whose cross-references do not resolve."""
     target = tmp_path_factory.mktemp("drawings") / "TD-1001_refs.dxf"

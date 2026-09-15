@@ -15,7 +15,7 @@ prioritised, marked-up report.*
 
 | Aile | Örnek bulgular |
 | --- | --- |
-| Ölçülendirme (`DIM001–DIM015`) | **konumu belirlenmemiş delik**, ölçü zincirine bağlanmamış geometri, ölçüsüz görünüş, ölçülendirilmemiş delik, kapalı ölçü zinciri (aşırı ölçülendirme), **ölçü metni geometriyle uyuşmuyor**, eksik ⌀ sembolü, toplam ölçü yok, açısı verilmemiş eğik kenar |
+| Ölçülendirme (`DIM001–DIM018`) | **konumu belirlenmemiş delik**, ölçü zincirine bağlanmamış geometri, ölçüsüz görünüş, ölçülendirilmemiş delik, kapalı ölçü zinciri (aşırı ölçülendirme), **ölçü metni geometriyle uyuşmuyor**, eksik ⌀ sembolü, toplam ölçü yok, açısı verilmemiş eğik kenar, **kalınlığı verilmemiş tek görünüş**, çapı verilmemiş delik dairesi, ölçüsüz pah |
 | Referanslar (`REF001–REF007`) | **görünüşü olmayan kesit işareti**, işareti olmayan kesit görünüşü, aynı harfin iki kez kullanılması, yazılmamış nota gönderme, var olmayan sayfaya gönderme, çizilmemiş görünüşe gönderme, yetim görünüş başlığı |
 | Görünüşler arası (`CRV001–CRV003`) | **hizalı görünüşler aynı ölçüyü farklı veriyor**, görünüş geometrileri uyuşmuyor, aynı ölçü iki görünüşte tekrarlanmış |
 | Tolerans (`TOL001–TOL012`) | toleranssız ölçü (genel tolerans notu yoksa majör), ters/sıfır tolerans aralığı, ondalık hane uyumsuzluğu, gerçekçi olmayan dar tolerans, karışık gösterim, **ISO 2768 ve ISO 286 sayısal denetimleri** (aşağıya bakın) |
@@ -24,7 +24,7 @@ prioritised, marked-up report.*
 | Antet (`TB001–TB011`) | antet yok, zorunlu alan boş, "TBD" yer tutucusu, standart dışı ölçek, tarihsiz revizyon, çizen = onaylayan, izdüşüm yöntemi yok, birim yok, sayfa numarası tutarsız |
 | Tutarlılık (`CON001–CON006`) | karışık birimler, ölçek–geometri uyuşmazlığı, sayfalar arası resim no çakışması, görsel çıkarım yapılmadan okunamayan sayfa |
 
-Tam liste: `catia-diff rules --lang tr` (70 kural)
+Tam liste: `catia-diff rules --lang tr` (73 kural)
 
 ### ISO 286 geçme sınıfları sayısal olarak
 
@@ -93,6 +93,34 @@ Kapı kuralı: belgede **hiçbir** kesit işareti tanınamadıysa `REF002` hiç
 çalışmaz. Çizim ofisleri kesiti farklı işaretler; tespit tutmuyorsa kural
 susar, her başlığı "işaretsiz" diye yakmaz. Ayrıntı:
 [`docs/REFERENCES.md`](docs/REFERENCES.md).
+
+### Grafiğin göremediği üç eksik
+
+Kısıt grafiği eksen başına çalışır; bir resim her eksende tam görünüp yine de
+imal edilemez olabilir:
+
+| Kural | Ne kaçar |
+| --- | --- |
+| `DIM016` | **Kalınlık**: tek görünüş parçanın üç boyutundan ikisini gösterir; üçüncüsü bir notta, malzeme alanında veya ikinci bir görünüşte yazılı değilse parça yapılamaz |
+| `DIM017` | **Delik dairesi**: bir merkez etrafında eşit aralıklı delikler x/y ile değil, delik dairesi çapı + bölüntü ile konumlandırılır |
+| `DIM018` | **Pah**: kırılmış köşe, bacak + açı (`1x45°`) ile ya da blanket notla verilir |
+
+```
+catia-diff audit examples/sample_flange.dxf --lang tr
+  KRITIK DIM016  Parça tek görünüşte çizilmiş ve kalınlık hiçbir yerde belirtilmemiş:
+                 ne notta, ne malzeme alanında, ne de ikinci bir görünüşte.
+  MAJÖR  DIM017  6 adet ⌀9 delik, (60.0, 40.0) merkezli ⌀90 bir çember üzerinde eşit
+                 aralıklı duruyor ancak bu delik dairesi ölçülendirilmemiş.
+  MINÖR  DIM018  (117.0, 77.0) konumundaki 1 pah ne ölçülendirilmiş ne de bir blanket
+                 notla kapsanmış.
+```
+
+Tanımlar dar tutulmuştur: bir **delik dairesi**, eş yarıçaplı, çembersel *ve
+eşit açısal bölüntülü* ≥3 deliktir — dikdörtgen köşesindeki dört delik de çember
+üzerindedir ama delik dairesi değildir, onları x/y ölçüleri konumlandırır.
+`DIM011` delik dairesine ait deliklerde susar: kusur "iki ölçü eksik" değil,
+"bir delik dairesi eksik"tir. Şaft gibi çapıyla tanımlanan parçalarda `DIM016`
+çalışmaz.
 
 ### Görünüşler arası tutarlılık
 
@@ -171,6 +199,11 @@ catia-diff audit examples/sample_2768.dxf --lang tr --out reports
 # Tam ölçülendirilmiş varyant: kapsam kuralları hiç bulgu üretmemeli
 python examples/generate_sample_drawing.py examples/sample_ok.dxf --complete
 catia-diff audit examples/sample_ok.dxf --lang tr --out reports
+
+# Flanş: kalınlık, delik dairesi ve pah eksikleri (ve doğru varyantı)
+python examples/generate_sample_drawing.py examples/sample_flange.dxf --flange
+python examples/generate_sample_drawing.py examples/sample_flange_ok.dxf --flange --complete
+catia-diff audit examples/sample_flange.dxf --lang tr
 
 # Kırık referanslar: sarkan kesit işareti, yazılmamış nota gönderme (ve doğru varyantı)
 python examples/generate_sample_drawing.py examples/sample_refs.dxf --refs
@@ -289,7 +322,7 @@ Ayrıntılar, akış diyagramı, mesaj protokolü ve veri modeli:
 @register
 class MyRule(Rule):
     meta = RuleMeta(
-        id="DIM016",
+        id="DIM019",
         title="Chamfer without an angle",
         title_tr="Açısı belirtilmemiş pah",
         severity=Severity.MAJOR,
@@ -314,7 +347,7 @@ Kayıt otomatiktir; CLI, rapor ve testler kuralı hemen görür.
 ## Geliştirme / Development
 
 ```bash
-pytest -q                      # 421 test, isteğe bağlı bağımlılık yoksa atlanır
+pytest -q                      # 446 test, isteğe bağlı bağımlılık yoksa atlanır
 pytest --cov=catia_diff        # ~%91 kapsam
 ruff check src tests examples run_ui.py
 ```

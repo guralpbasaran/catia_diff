@@ -8,6 +8,7 @@ Run::
     python examples/generate_sample_drawing.py examples/sample_plate_fits.dxf --fits
     python examples/generate_sample_drawing.py examples/sample_plate_views.dxf --views
     python examples/generate_sample_drawing.py examples/sample_plate_refs.dxf --refs
+    python examples/generate_sample_drawing.py examples/sample_plate_flange.dxf --flange
 
 The produced sheet is a 80 x 40 plate with four holes and the following
 *intentional* problems, one per rule family:
@@ -44,11 +45,13 @@ flatness with datum A       GDT004 form tolerance with a datum
 surface symbol without Ra   SYM001 surface finish without value
 MALZEME = "TBD"             TB003 placeholder left in the title block
 no revision, no ISO 2768    TB002 / TB008 missing mandatory field, no general tol.
+one view, no thickness      DIM016 the third dimension is stated nowhere
 ==========================  ======================================================
 """
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -66,6 +69,7 @@ def build(
     fits: bool = False,
     views: bool = False,
     refs: bool = False,
+    flange: bool = False,
 ) -> ezdxf.document.Drawing:
     doc = ezdxf.new("R2018", setup=True)
     doc.header["$INSUNITS"] = 4  # millimetres
@@ -74,6 +78,11 @@ def build(
     for name in ("PART", "DIMS", "GDT", "TEXT", "TITLE", "CENTER", "PHANTOM"):
         if name not in doc.layers:
             doc.layers.add(name)
+
+    if flange:
+        _flange_plate(msp, correct=complete)
+        _title_block(doc, msp, complete=True)
+        return doc
 
     if refs:
         _reference_plate(msp, correct=complete)
@@ -233,7 +242,8 @@ def _fitted_plate(msp) -> None:
         msp.add_linear_dim(base=base, p1=p1, p2=p2, angle=90, dxfattribs=style).render()
 
     msp.add_mtext(
-        "GENEL TOLERANSLAR ISO 2768-mK\PÖLÇÜLER MM CİNSİNDENDİR\P3. AÇI İZDÜŞÜMÜ",
+        "GENEL TOLERANSLAR ISO 2768-mK\PÖLÇÜLER MM CİNSİNDENDİR\P3. AÇI İZDÜŞÜMÜ"
+        "\PKALINLIK 12",
         dxfattribs={"layer": "TEXT", "char_height": 2.5},
     ).set_location((0, 72))
     msp.add_mtext("√ Ra 1.6", dxfattribs={"layer": "TEXT", "char_height": 3.0}).set_location(
@@ -278,7 +288,8 @@ def _complete_plate(msp) -> None:
         center=HOLES[0], radius=HOLE_R, angle=135, text="4x %%c6.5", dxfattribs=style
     ).render()
     msp.add_mtext(
-        "GENEL TOLERANSLAR ISO 2768-mK\PÖLÇÜLER MM CİNSİNDENDİR\P3. AÇI İZDÜŞÜMÜ",
+        "GENEL TOLERANSLAR ISO 2768-mK\PÖLÇÜLER MM CİNSİNDENDİR\P3. AÇI İZDÜŞÜMÜ"
+        "\PKALINLIK 5",
         dxfattribs={"layer": "TEXT", "char_height": 2.5},
     ).set_location((0, 52))
     msp.add_mtext("√ Ra 3.2", dxfattribs={"layer": "TEXT", "char_height": 3.0}).set_location(
@@ -373,6 +384,80 @@ def _multiview_plate(msp, correct: bool = False) -> None:
     msp.add_mtext("√ Ra 3.2", dxfattribs={"layer": "TEXT", "char_height": 3.0}).set_location(
         (70, 58)
     )
+
+
+def _flange_plate(msp, correct: bool = False) -> None:
+    """A flange whose completeness the per-axis graph cannot judge.
+
+    Three ways a drawing can be incomplete without any axis looking short:
+
+    ==========================  ==================================================
+    Defect                      Expected rule
+    ==========================  ==================================================
+    one view, no thickness      DIM016 the third dimension is written nowhere
+    6 holes on ⌀90, no PCD      DIM017 bolt circle without its pitch circle
+    6x6 corner, no callout      DIM018 chamfer without a size
+    ==========================  ==================================================
+
+    Holes spaced around a centre are not located by x/y pairs, so the constraint
+    graph would only say "these centres are not reached" - true, but the drawing
+    is not missing two ordinary dimensions, it is missing one pitch circle.
+
+    ``correct=True`` (``--flange --complete``) states all three and must be silent.
+    """
+    style = {"layer": "DIMS"}
+    width, height = 120.0, 80.0
+    chamfer = 6.0
+    pcd, hole_r, count = 90.0, 4.5, 6
+    cx, cy = width / 2, height / 2
+
+    msp.add_lwpolyline(
+        [
+            (0, 0),
+            (width, 0),
+            (width, height - chamfer),
+            (width - chamfer, height),
+            (0, height),
+        ],
+        close=True,
+        dxfattribs={"layer": "PART"},
+    )
+    for index in range(count):
+        angle = math.radians(360.0 / count * index)
+        msp.add_circle(
+            (cx + pcd / 2 * math.cos(angle), cy + pcd / 2 * math.sin(angle)),
+            hole_r,
+            dxfattribs={"layer": "PART"},
+        )
+
+    for base, p1, p2 in (((0, -22), (0, 0), (width, 0)),):
+        msp.add_linear_dim(base=base, p1=p1, p2=p2, dxfattribs=style).render()
+    msp.add_linear_dim(
+        base=(-22, 0), p1=(0, 0), p2=(0, height), angle=90, dxfattribs=style
+    ).render()
+
+    notes = [
+        "GENEL TOLERANSLAR ISO 2768-mK",
+        "ÖLÇÜLER MM CİNSİNDENDİR",
+        "3. AÇI İZDÜŞÜMÜ",
+    ]
+    if correct:
+        # The pitch circle, the spacing, the chamfer and the thickness.
+        msp.add_diameter_dim(
+            center=(cx, cy), radius=pcd / 2, angle=30, text="%%c90 DELİK DAİRESİ",
+            dxfattribs=style,
+        ).render()
+        msp.add_diameter_dim(
+            center=(cx + pcd / 2, cy), radius=hole_r, angle=135,
+            text=f"{count}x %%c{hole_r * 2:g} EŞİT BÖLÜNMÜŞ", dxfattribs=style,
+        ).render()
+        msp.add_mtext(
+            "6x45°", dxfattribs={"layer": "TEXT", "char_height": 2.5}
+        ).set_location((width - chamfer + 1, height - chamfer + 1))
+        notes.append("KALINLIK 10")
+    msp.add_mtext(
+        "\\P".join(notes), dxfattribs={"layer": "TEXT", "char_height": 2.5}
+    ).set_location((0, height + 16))
 
 
 def _reference_plate(msp, correct: bool = False) -> None:
@@ -476,13 +561,23 @@ def main(argv: list[str]) -> int:
     fits = "--fits" in flags
     views = "--views" in flags
     refs = "--refs" in flags
+    flange = "--flange" in flags
     target = Path(args[0]) if args else Path("examples/sample_plate.dxf")
     target.parent.mkdir(parents=True, exist_ok=True)
     build(
-        with_general_tolerance=variant, complete=complete, fits=fits, views=views, refs=refs
+        with_general_tolerance=variant,
+        complete=complete,
+        fits=fits,
+        views=views,
+        refs=refs,
+        flange=flange,
     ).saveas(target)
     note = (
-        " (cross-references, correct)"
+        " (flange, correct)"
+        if flange and complete
+        else " (flange)"
+        if flange
+        else " (cross-references, correct)"
         if refs and complete
         else " (cross-references)"
         if refs

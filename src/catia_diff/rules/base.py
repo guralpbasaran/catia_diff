@@ -52,6 +52,7 @@ class RuleContext:
         self._coverage: dict[int, list] = {}
         self._alignments: dict[int, list] = {}
         self._markers: dict[int, list] = {}
+        self._bolt_circles: dict[int, list] = {}
         self._inherited: dict[int, dict[str, set[str]]] = {}
         self._blanket: dict[int, frozenset[str]] = {}
 
@@ -138,6 +139,23 @@ class RuleContext:
             for sheet in self.document.sheets
             for marker in self.markers(sheet)
         ]
+
+    def bolt_circles(self, sheet: Sheet):
+        """``[(view, [BoltCircle, ...])]`` for the sheet, found once."""
+        if sheet.index not in self._bolt_circles:
+            from catia_diff.rules.patterns import bolt_circles
+
+            out = []
+            for view in sheet.views:
+                if not view.is_geometric:
+                    continue
+                members = set(view.member_ids)
+                features = [f for f in sheet.features if f.id in members]
+                circles = bolt_circles(features)
+                if circles:
+                    out.append((view, circles))
+            self._bolt_circles[sheet.index] = out
+        return self._bolt_circles[sheet.index]
 
     def blanket_notes(self, sheet: Sheet) -> frozenset[str]:
         """Categories a blanket note already covers ("ALL FILLETS R3")."""

@@ -24,7 +24,7 @@ Kritik / Majör / Minör / Bilgi.
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[all,dev]"
 
-.venv/bin/python -m pytest            # 421 test
+.venv/bin/python -m pytest            # 446 test
 .venv/bin/python -m pytest --cov=src/catia_diff --cov-report=term-missing
 .venv/bin/ruff check src tests examples run_ui.py
 .venv/bin/mypy src
@@ -32,7 +32,7 @@ python -m venv .venv && .venv/bin/pip install -e ".[all,dev]"
 catia-diff audit examples/sample_plate.dxf --lang tr --out reports
 catia-diff ui --port 8050 --lang tr   # tarayıcı panosu (Dash)
 python run_ui.py                      # aynı pano, IDE'den tek tık (parametresiz)
-catia-diff rules --lang tr            # 70 kural
+catia-diff rules --lang tr            # 73 kural
 catia-diff formats
 python examples/generate_sample_drawing.py /tmp/tam.dxf --complete --fits --iso2768
 ```
@@ -49,7 +49,7 @@ Testler `conftest.py` üzerinden `src`'i yola ekler; ad hoc betiklerde
 | `extract/` | Format başına çıkarıcı + `registry`. Ortak metin grameri `text_parsing.py`'dedir — **her kaynak (DXF/PDF/Vision) aynı gramerden geçer.** |
 | `llm/` | Claude soyutlaması: `base.VisionClient` arayüzü, `anthropic_client`, testler için `mock`. Kural kodu Anthropic SDK'sını doğrudan görmez. |
 | `models/` | Pydantic v2 alan modeli. Çıkarım ile denetim arasındaki **tek sözleşme** burasıdır. |
-| `rules/` | Kural motoru (`base.py`) + aile başına bir modül. `analysis.py`, `constraints.py`, `projection.py` ve `markers.py` kural içermez, saf yardımcıdır. |
+| `rules/` | Kural motoru (`base.py`) + aile başına bir modül. `analysis.py`, `constraints.py`, `projection.py`, `markers.py` ve `patterns.py` kural içermez, saf yardımcıdır. |
 | `standards/` | Makine-okunur standart verisi: `iso2768.py` (genel toleranslar), `iso286.py` (limitler ve geçmeler). |
 | `reporting/` | `normalize` (sıralama/tekilleştirme), `render` (JSON/MD/HTML), `overlay` (numaralı kutular). Kutu numaraları `normalize.overlay_numbers`'dan gelir; panodaki `No` sütunu da aynı kaynağı okur. |
 | `ui/` | Dash panosu. `service`/`presenters`/`charts`/`theme` Dash'e bağımlı **değildir**; `app.py` yalnızca yerleşim ve bağlantıdır. Geri çağırmalar ince kalır: her biri bir `*_view` fonksiyonuna devreder, test o fonksiyonu çağırır (tarayıcı gerekmez). |
@@ -62,7 +62,7 @@ Bir denetim eklemek = **bir sınıf eklemek**; başka dosya değişmez.
 @register
 class MyRule(Rule):
     meta = RuleMeta(
-        id="DIM016",
+        id="DIM019",            # aile içinde sıradaki boş numara
         title="…",              # EN
         title_tr="…",           # TR
         severity=Severity.MAJOR,
@@ -93,6 +93,12 @@ referans koordinatları düğüm, ölçüler kenardır.
 - kapsayan ağaç → tam ölçülendirilmiş
 - `bileşen − 1` → o kadar **eksik** ölçü (`DIM011`, `DIM012`)
 - çevrim sayısı → o kadar **fazla** ölçü (`DIM003`, `TOL010`)
+
+Grafiğin göremediği üç eksik ayrı kurallardadır: `DIM016` kalınlık (tek görünüş,
+üçüncü boyut hiçbir yerde), `DIM017` delik dairesi çapı, `DIM018` pah ölçüsü.
+Delik dairesi tanımı dardır — eş yarıçaplı, çembersel **ve eşit açısal
+bölüntülü** ≥3 delik; dikdörtgen köşeleri bu tanıma girmez. `DIM011` delik
+dairesindeki deliklerde susar (`rules/patterns.py`).
 
 `rules/projection.py` bunu görünüşler arasına taşır: ortografik olarak hizalı iki
 görünüş bir ekseni paylaşır. O eksen komşu görünüşte ölçülendirilmişse burada
