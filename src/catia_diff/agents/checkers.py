@@ -68,4 +68,4 @@ class ConsistencyAgent(RuleAgent):
 
     name = "consistency"
     accepts = (TaskKind.CHECK_CONSISTENCY,)
-    categories = (Category.CONSISTENCY, Category.EXTRACTION)
+    categories = (Category.CONSISTENCY, Category.EXTRACTION, Category.REFERENCE)

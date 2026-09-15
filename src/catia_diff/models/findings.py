@@ -75,6 +75,7 @@ SEVERITY_COLORS: dict[Severity, str] = {
 class Category(str, Enum):
     DIMENSIONING = "dimensioning"
     CROSS_VIEW = "cross_view"
+    REFERENCE = "reference"
     TOLERANCING = "tolerancing"
     GDT = "gdt"
     TITLE_BLOCK = "title_block"
@@ -90,6 +91,7 @@ _CATEGORY_LABELS: dict[str, dict[Category, str]] = {
     "en": {
         Category.DIMENSIONING: "Dimensioning",
         Category.CROSS_VIEW: "Cross-view",
+        Category.REFERENCE: "References",
         Category.TOLERANCING: "Tolerancing",
         Category.GDT: "Geometric tolerancing",
         Category.TITLE_BLOCK: "Title block",
@@ -100,6 +102,7 @@ _CATEGORY_LABELS: dict[str, dict[Category, str]] = {
     "tr": {
         Category.DIMENSIONING: "Ölçülendirme",
         Category.CROSS_VIEW: "Görünüşler arası",
+        Category.REFERENCE: "Referanslar",
         Category.TOLERANCING: "Tolerans",
         Category.GDT: "Geometrik tolerans",
         Category.TITLE_BLOCK: "Antet",

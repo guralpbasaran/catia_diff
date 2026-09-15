@@ -22,6 +22,14 @@ from catia_diff.models.drawing import (
 from catia_diff.rules.constraints import DimensionCycle, dimension_cycles
 
 #: Layers whose circles are construction geometry rather than real features.
+#: Geometry that is drawn but is not the part: a cutting plane, an alternate
+#: position, an adjacent component.  It marks *where a view is taken*, not a
+#: coordinate the drawing has to dimension.
+_IMAGINARY_LAYER_RE = re.compile(
+    r"(phantom|section|cut(?:ting)?[_ -]?plane|kesit|hayali|sanal)",
+    re.IGNORECASE,
+)
+
 _NON_FEATURE_LAYER_RE = re.compile(
     r"(center|centre|axis|hidden|phantom|dim|text|annot|hatch|frame|border|title|"
     r"eksen|yaz|tarama|cerceve|çerçeve)",
@@ -302,3 +310,8 @@ def tolerance_width(dim: Dimension) -> float | None:
         return None
     upper, lower = deviations
     return abs(upper - lower)
+
+
+def is_imaginary(feature) -> bool:
+    """True for geometry that shows something other than the part's own edges."""
+    return bool(feature.layer and _IMAGINARY_LAYER_RE.search(feature.layer))

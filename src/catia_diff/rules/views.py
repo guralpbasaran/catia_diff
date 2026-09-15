@@ -17,12 +17,18 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from catia_diff.config import AuditConfig
+from catia_diff.extract.text_parsing import parse_view_caption
 from catia_diff.extract.title_block_scan import title_block_region
 from catia_diff.models.drawing import DrawingObject, GeometryFeature, Sheet, View
 from catia_diff.models.geometry import BBox
 
 #: A cluster with fewer objects than this is noise (a stray symbol, a leader).
 MIN_CLUSTER_OBJECTS = 2
+
+#: How far a caption may sit from the view it titles, in view gaps.  A title is
+#: written just under its view; anything further away is a caption for something
+#: else - or for nothing.
+CAPTION_REACH = 3.0
 
 
 @dataclass
@@ -57,7 +63,10 @@ def segment_views(sheet: Sheet, config: AuditConfig | None = None) -> list[View]
 
     Returns the views in reading order (top-left first).  Caption views that the
     extractor produced from text such as ``SECTION A-A`` are consumed: their
-    label is transferred to the geometric view they sit on.
+    label is transferred to the geometric view they sit on.  A caption that sits
+    too far from any of them is *kept* instead, as a view with no geometry -
+    silently stamping it onto whichever view happens to be nearest would invent
+    a title for a view that never carried one.
     """
     config = config or AuditConfig()
     features = [f for f in sheet.features if f.bbox is not None and f.bbox.area >= 0.0]
@@ -78,8 +87,8 @@ def segment_views(sheet: Sheet, config: AuditConfig | None = None) -> list[View]
 
     views = _build_views(sheet, clusters)
     _assign_callouts(sheet, views, gap)
-    _apply_captions(views, captions)
-    sheet.views = views
+    orphans = _apply_captions(views, captions, gap * CAPTION_REACH)
+    sheet.views = views + orphans
     return views
 
 
@@ -172,17 +181,26 @@ def _assign_callouts(sheet: Sheet, views: list[View], gap: float) -> None:
             best[1].member_ids.append(obj.id)
 
 
-def _apply_captions(views: list[View], captions: list[View]) -> None:
-    """Move 'SECTION A-A' style labels onto the view they caption."""
+def _apply_captions(views: list[View], captions: list[View], reach: float) -> list[View]:
+    """Move 'SECTION A-A' style labels onto the view they caption.
+
+    Returns the captions that reached no view: they are a defect the reference
+    rules report (`REF007`), not something to attach to an arbitrary view.
+    """
+    orphans: list[View] = []
     for caption in captions:
         if caption.bbox is None or not views:
+            orphans.append(caption)
             continue
         nearest = min(views, key=lambda view: _distance(view.bbox, caption.bbox))
-        if nearest.label is None:
-            nearest.label = caption.label
-            upper = (caption.label or "").upper()
-            nearest.is_section = "SECTION" in upper or "KESIT" in upper or "KESİT" in upper
-            nearest.is_detail = "DETAIL" in upper or "DETAY" in upper
+        if _distance(nearest.bbox, caption.bbox) > reach or nearest.label is not None:
+            orphans.append(caption)
+            continue
+        nearest.label = caption.label
+        parsed = parse_view_caption(caption.label)
+        nearest.is_section = parsed is not None and parsed.kind == "section"
+        nearest.is_detail = parsed is not None and parsed.kind == "detail"
+    return orphans
 
 
 def _distance(a: BBox, b: BBox) -> float:

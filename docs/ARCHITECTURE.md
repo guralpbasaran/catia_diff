@@ -19,9 +19,9 @@ flowchart TD
     end
 
     E --> D[(DrawingDocument<br/>pydantic)]
-    D --> C1[Dimensioning Agent<br/>DIM / TOL / GDT / SYM]
+    D --> C1[Dimensioning Agent<br/>DIM / CRV / TOL / GDT / SYM]
     D --> C2[Title Block Agent<br/>TB]
-    D --> C3[Consistency Agent<br/>CON]
+    D --> C3[Consistency Agent<br/>CON / REF]
     C1 & C2 & C3 -->|Finding listesi| R[Report Agent]
     R --> R1[normalize: dedupe → cap → sort]
     R --> R2[overlay PNG]
@@ -123,8 +123,9 @@ class UndimensionedFeatureRule(Rule):
 
 * `register` kayıt defterine ekler; `rules_for(config)` profil (ISO/ASME),
   kategori ve `--only/--disable` süzgeçlerini uygular.
-* `RuleContext` paylaşılan türetilmiş bilgileri önbelleğe alır (genel tolerans
-  notu var mı, profil ASME mi).
+* `RuleContext` paylaşılan türetilmiş bilgileri önbelleğe alır: genel tolerans
+  notu, kapsam analizi, görünüş hizalamaları ve miras eksenler, blanket notlar,
+  kesit/detay işaretleri. Kural içinde yeniden hesaplanmaz.
 * `run_rules` her kuralı yalıtır: patlayan bir kural `INFO` bulgusuna dönüşür,
   denetimi durdurmaz.
 * Yeni bir denetim eklemek = tek bir sınıf eklemek. Başka hiçbir dosya değişmez.
@@ -205,6 +206,32 @@ görünüşler aynı, `%2–%10` arasındaysa **aynı olması gerekirken ayrış
 (rapor edilir), `%10`'un üstündeyse farklı şeylerdir (detay, kopuk görünüş,
 başka ölçek) ve ne karşılaştırma ne miras uygulanır. Detay görünüşleri
 (`View.is_detail`) tamamen dışarıda kalır.
+
+## 6b. Referans bütünlüğü / Reference integrity
+
+Kapsam analizi *geometrik* referansı çözer (hangi koordinat hangi ölçüyle
+bağlanıyor); `rules/references.py` **sembolik** olanı çözer: kesit işareti →
+görünüş, not numarası → not, sayfa numarası → sayfa. Model aynı: her *kullanım*
+tam olarak bir *bildirime* çözülmeli, aksi hâlde okuyucu işi bitiremez.
+
+İki ayrım kritiktir:
+
+* **Başlık mı, gönderme mi?** Çıkarıcı içinde "DETAY" geçen her metni görünüş
+  olarak dosyalar. `parse_view_caption` başa demirlidir ve harften sonra yalnızca
+  ölçeğe izin verir; `view_references` metin içinde arar. Böylece
+  `DETAY C'YE BAKINIZ` bir bildirim değil kullanım sayılır.
+* **İşaret mi, datum mu?** Kesit düzlemi harf çiftinden (`A-A`) tanınır — bir
+  resimde başka hiçbir şey öyle yazılmaz. Detay balonu tek harftir, ki bu datum
+  sembolünün de yazılışıdır: bu yüzden yalnızca parça-dışı bir daireyle birlikte
+  işaret sayılır (`rules/markers.py`).
+
+Kapı kuralı: belgede hiçbir işaret tanınamadıysa `REF002` çalışmaz. Çizim stili
+tespitin dışında kalıyorsa kural yanlış pozitif üretmek yerine susar — kapsam
+analizindeki `has_interval_data()` ile aynı disiplin.
+
+Yan etki: "hayali" geometri (kesit düzlemi, alternatif konum) artık ne kapsam
+düğümü üretir ne de görünüşün sınırını genişletir. Ayrıntı:
+[`REFERENCES.md`](REFERENCES.md).
 
 ## 7. Çok modlu çıkarım / Multimodal extraction
 

@@ -7,6 +7,7 @@ Run::
     python examples/generate_sample_drawing.py examples/sample_plate_ok.dxf --complete
     python examples/generate_sample_drawing.py examples/sample_plate_fits.dxf --fits
     python examples/generate_sample_drawing.py examples/sample_plate_views.dxf --views
+    python examples/generate_sample_drawing.py examples/sample_plate_refs.dxf --refs
 
 The produced sheet is a 80 x 40 plate with four holes and the following
 *intentional* problems, one per rule family:
@@ -64,14 +65,20 @@ def build(
     complete: bool = False,
     fits: bool = False,
     views: bool = False,
+    refs: bool = False,
 ) -> ezdxf.document.Drawing:
     doc = ezdxf.new("R2018", setup=True)
     doc.header["$INSUNITS"] = 4  # millimetres
     doc.header["$LUPREC"] = 2
     msp = doc.modelspace()
-    for name in ("PART", "DIMS", "GDT", "TEXT", "TITLE", "CENTER"):
+    for name in ("PART", "DIMS", "GDT", "TEXT", "TITLE", "CENTER", "PHANTOM"):
         if name not in doc.layers:
             doc.layers.add(name)
+
+    if refs:
+        _reference_plate(msp, correct=complete)
+        _title_block(doc, msp, complete=True)
+        return doc
 
     if views:
         _multiview_plate(msp, correct=complete)
@@ -368,6 +375,70 @@ def _multiview_plate(msp, correct: bool = False) -> None:
     )
 
 
+def _reference_plate(msp, correct: bool = False) -> None:
+    """A plate whose cross-references do not resolve.
+
+    Every pointer on a drawing has to land on something: a cutting plane on a
+    section view, a note number on a note, a sheet number on a sheet.  This
+    variant breaks four of them at once, which is how they show up in practice -
+    a view gets deleted and the things pointing at it stay behind.
+
+    ==========================  ==================================================
+    Defect                      Expected rule
+    ==========================  ==================================================
+    A-A cut, no section view    REF001 marker without a view
+    "BKZ NOT 7", notes are 1-3  REF004 reference to a note that is not written
+    "MONTAJ İÇİN SAYFA 3"       REF005 reference to a sheet that does not exist
+    "DETAY C'YE BAKINIZ"        REF006 text points at a view that does not exist
+    stray "KESİT B-B" title     REF007 view title sits on no view
+    ==========================  ==================================================
+
+    ``correct=True`` (``--refs --complete``) draws the section view, points the
+    note at a note that exists and drops the stray title: the whole family must
+    then stay silent.
+    """
+    style = {"layer": "DIMS"}
+    _complete_plate(msp)
+
+    # -- the cutting plane: a phantom line and its letter pair ----------
+    msp.add_line((40, -8), (40, 48), dxfattribs={"layer": "PHANTOM"})
+    msp.add_mtext("A-A", dxfattribs={"layer": "TEXT", "char_height": 3.0}).set_location((42, 49))
+
+    if correct:
+        # The section it promises, drawn beside the view it is cut from.
+        msp.add_lwpolyline(
+            [(100, 0), (120, 0), (120, PLATE_H), (100, PLATE_H)],
+            close=True,
+            dxfattribs={"layer": "PART"},
+        )
+        msp.add_linear_dim(
+            base=(100, 52), p1=(100, PLATE_H), p2=(120, PLATE_H), dxfattribs=style
+        ).render()
+        msp.add_mtext(
+            "KESİT A-A", dxfattribs={"layer": "TEXT", "char_height": 3.0}
+        ).set_location((100, -10))
+
+    notes = [
+        "NOTLAR:",
+        "1. KESKİN KÖŞELER KIRILACAK.",
+        "2. ÇAPAK ALINACAK.",
+        "3. BOYA RAL 7016.",
+    ]
+    notes.append("YÜZEY İŞLEMİ İÇİN BKZ NOT 2." if correct else "YÜZEY İŞLEMİ İÇİN BKZ NOT 7.")
+    if not correct:
+        notes.append("KANAL İÇİN DETAY C'YE BAKINIZ.")
+        notes.append("MONTAJ İÇİN SAYFA 3.")
+    msp.add_mtext(
+        "\\P".join(notes), dxfattribs={"layer": "TEXT", "char_height": 2.5}
+    ).set_location((0, 70))
+
+    if not correct:
+        # A title left behind when its view was deleted.
+        msp.add_mtext(
+            "KESİT B-B", dxfattribs={"layer": "TEXT", "char_height": 3.0}
+        ).set_location((-60, 100))
+
+
 def _title_block(doc: ezdxf.document.Drawing, msp, complete: bool = False) -> None:
     block = doc.blocks.new(name="TITLEBLOCK")
     rows = [
@@ -404,13 +475,18 @@ def main(argv: list[str]) -> int:
     complete = "--complete" in flags
     fits = "--fits" in flags
     views = "--views" in flags
+    refs = "--refs" in flags
     target = Path(args[0]) if args else Path("examples/sample_plate.dxf")
     target.parent.mkdir(parents=True, exist_ok=True)
     build(
-        with_general_tolerance=variant, complete=complete, fits=fits, views=views
+        with_general_tolerance=variant, complete=complete, fits=fits, views=views, refs=refs
     ).saveas(target)
     note = (
-        " (three orthographic views, correct)"
+        " (cross-references, correct)"
+        if refs and complete
+        else " (cross-references)"
+        if refs
+        else " (three orthographic views, correct)"
         if views and complete
         else " (three orthographic views)"
         if views
