@@ -86,3 +86,35 @@ def test_views_are_ordered_for_reading():
     views = segment_views(sheet, AuditConfig())
     assert views[0].member_ids == ["HIGH"]
     assert views[1].member_ids == ["LOW"]
+
+
+def test_a_caption_too_far_from_any_view_is_kept_not_attached():
+    """Stamping a stray title onto the nearest view invents a name for it."""
+    from catia_diff.models.drawing import View
+    from catia_diff.rules.views import segment_views
+    from tests.conftest import box, make_circle, make_sheet
+
+    sheet = make_sheet(
+        features=[make_circle("F1", x=10, y=10, r=4), make_circle("F2", x=14, y=10, r=4)],
+        views=[View(id="CAP01", label="KESİT B-B", bbox=box(180, 130, 20, 5))],
+    )
+    views = segment_views(sheet)
+
+    assert [view.label for view in views] == [None]
+    orphans = [view for view in sheet.views if not view.is_geometric]
+    assert [view.label for view in orphans] == ["KESİT B-B"]
+
+
+def test_a_caption_beside_its_view_is_attached():
+    from catia_diff.models.drawing import View
+    from catia_diff.rules.views import segment_views
+    from tests.conftest import box, make_circle, make_sheet
+
+    sheet = make_sheet(
+        features=[make_circle("F1", x=10, y=10, r=4), make_circle("F2", x=14, y=10, r=4)],
+        views=[View(id="CAP01", label="KESİT B-B", bbox=box(8, 2, 12, 3))],
+    )
+    views = segment_views(sheet)
+
+    assert views[0].label == "KESİT B-B"
+    assert views[0].is_section

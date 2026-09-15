@@ -24,7 +24,7 @@ Kritik / Majör / Minör / Bilgi.
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[all,dev]"
 
-.venv/bin/python -m pytest            # 374 test
+.venv/bin/python -m pytest            # 421 test
 .venv/bin/python -m pytest --cov=src/catia_diff --cov-report=term-missing
 .venv/bin/ruff check src tests examples run_ui.py
 .venv/bin/mypy src
@@ -32,7 +32,7 @@ python -m venv .venv && .venv/bin/pip install -e ".[all,dev]"
 catia-diff audit examples/sample_plate.dxf --lang tr --out reports
 catia-diff ui --port 8050 --lang tr   # tarayıcı panosu (Dash)
 python run_ui.py                      # aynı pano, IDE'den tek tık (parametresiz)
-catia-diff rules --lang tr            # 63 kural
+catia-diff rules --lang tr            # 70 kural
 catia-diff formats
 python examples/generate_sample_drawing.py /tmp/tam.dxf --complete --fits --iso2768
 ```
@@ -49,7 +49,7 @@ Testler `conftest.py` üzerinden `src`'i yola ekler; ad hoc betiklerde
 | `extract/` | Format başına çıkarıcı + `registry`. Ortak metin grameri `text_parsing.py`'dedir — **her kaynak (DXF/PDF/Vision) aynı gramerden geçer.** |
 | `llm/` | Claude soyutlaması: `base.VisionClient` arayüzü, `anthropic_client`, testler için `mock`. Kural kodu Anthropic SDK'sını doğrudan görmez. |
 | `models/` | Pydantic v2 alan modeli. Çıkarım ile denetim arasındaki **tek sözleşme** burasıdır. |
-| `rules/` | Kural motoru (`base.py`) + aile başına bir modül. `analysis.py`, `constraints.py` ve `projection.py` kural içermez, saf yardımcıdır. |
+| `rules/` | Kural motoru (`base.py`) + aile başına bir modül. `analysis.py`, `constraints.py`, `projection.py` ve `markers.py` kural içermez, saf yardımcıdır. |
 | `standards/` | Makine-okunur standart verisi: `iso2768.py` (genel toleranslar), `iso286.py` (limitler ve geçmeler). |
 | `reporting/` | `normalize` (sıralama/tekilleştirme), `render` (JSON/MD/HTML), `overlay` (numaralı kutular). Kutu numaraları `normalize.overlay_numbers`'dan gelir; panodaki `No` sütunu da aynı kaynağı okur. |
 | `ui/` | Dash panosu. `service`/`presenters`/`charts`/`theme` Dash'e bağımlı **değildir**; `app.py` yalnızca yerleşim ve bağlantıdır. Geri çağırmalar ince kalır: her biri bir `*_view` fonksiyonuna devreder, test o fonksiyonu çağırır (tarayıcı gerekmez). |
@@ -75,7 +75,7 @@ class MyRule(Rule):
         ...
 ```
 
-- Kural id'leri aile başına sıralıdır (`DIM`, `CRV`, `TOL`, `GDT`, `SYM`, `TB`, `CON`).
+- Kural id'leri aile başına sıralıdır (`DIM`, `CRV`, `REF`, `TOL`, `GDT`, `SYM`, `TB`, `CON`).
 - Pahalı türetmeler `RuleContext` üzerinde önbelleklenir (genel tolerans, kapsam
   analizi, blanket notlar) — kuralın içinde yeniden hesaplamayın.
 - `scope = "document"` sayfa yerine tüm belgeyi alır.
@@ -105,6 +105,20 @@ Görünüş ayrıştırma (`rules/views.py`) **çıkarım sırasında bir kez** 
 denetleyicilerle yarış olmaması için bunu kural içine taşımayın.
 Bu analiz aralık verisi ister, dolayısıyla **DXF-öncedir**; raster yolda
 çalıştırılmaz ve raporda nedeni yazılır (`CON005`).
+
+## Referans bütünlüğü (sembolik referanslar)
+
+`rules/references.py` + `rules/markers.py`: kesit işareti → görünüş, not
+numarası → not, sayfa numarası → sayfa. Çözümleme **belge genelindedir**.
+
+- `parse_view_caption` başa demirlidir (başlık), `view_references` metinde arar
+  (gönderme) — çıkarıcı "DETAY" içeren her metni görünüş dosyaladığı için bu
+  ayrım kuralın tamamını belirler.
+- Tek harfli işaret **yalnızca balon geometrisiyle** sayılır: tek harf, datum
+  sembolünün de yazılışıdır.
+- `REF002` kapılıdır: belgede hiç işaret tanınamadıysa çalışmaz.
+- "Hayali" geometri (kesit düzlemi, phantom) ne kapsam düğümü üretir ne de
+  görünüş sınırını genişletir (`analysis.is_imaginary`).
 
 ## Doğruluk disiplinleri (pazarlık dışı)
 
@@ -138,6 +152,7 @@ Bu analiz aralık verisi ister, dolayısıyla **DXF-öncedir**; raster yolda
 | `docs/DIMENSION_COVERAGE.md` | Kısıt grafiği modeli, örnek üzerinde adım adım çözüm |
 | `docs/ISO2768.md` | Genel tolerans tabloları ve sayısal denetim kapsamı |
 | `docs/ISO286.md` | IT dereceleri, temel sapmalar, geçme karakteri, kapsam sınırları |
+| `docs/REFERENCES.md` | Bildirim/kullanım modeli, işaret tespiti, yedi kural, kapı kuralı |
 
 ## Git
 

@@ -38,6 +38,11 @@ class VisionModel(ABC):
     def available(self) -> bool:
         return True
 
+    @property
+    def unavailable_reason(self) -> str | None:
+        """Why :attr:`available` is False, in words a user can act on."""
+        return None
+
     @abstractmethod
     def extract(
         self,

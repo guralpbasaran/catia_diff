@@ -51,6 +51,7 @@ class RuleContext:
         self._general_spec: dict[int, GeneralToleranceSpec | None] = {}
         self._coverage: dict[int, list] = {}
         self._alignments: dict[int, list] = {}
+        self._markers: dict[int, list] = {}
         self._inherited: dict[int, dict[str, set[str]]] = {}
         self._blanket: dict[int, frozenset[str]] = {}
 
@@ -117,6 +118,26 @@ class RuleContext:
 
     def axis_inherited(self, sheet: Sheet, view, axis_label: str) -> bool:
         return axis_label in self.inherited_axes(sheet).get(view.id, set())
+
+    def markers(self, sheet: Sheet):
+        """Cutting-plane and detail markers drawn on ``sheet``, found once."""
+        if sheet.index not in self._markers:
+            from catia_diff.rules.markers import detect_markers
+
+            self._markers[sheet.index] = detect_markers(sheet, self.config)
+        return self._markers[sheet.index]
+
+    def all_markers(self) -> list[tuple[int, object]]:
+        """Every marker in the document, as ``(sheet index, marker)``.
+
+        A section may be cut on one sheet and drawn on another, so resolving a
+        reference is a document-wide question.
+        """
+        return [
+            (sheet.index, marker)
+            for sheet in self.document.sheets
+            for marker in self.markers(sheet)
+        ]
 
     def blanket_notes(self, sheet: Sheet) -> frozenset[str]:
         """Categories a blanket note already covers ("ALL FILLETS R3")."""
@@ -297,6 +318,7 @@ def _load_rule_modules() -> None:
             cross_view,
             dimensioning,
             gdt,
+            references,
             symbols,
             title_block,
             tolerancing,

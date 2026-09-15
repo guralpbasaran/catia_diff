@@ -48,10 +48,8 @@ class ExtractionAgent(Agent):
             model = ctx.vision_model or build_vision_model(ctx.config.vision)
             ctx.vision_model = model
             if not model.available:
-                warnings.append(
-                    "vision backend unavailable (missing SDK or credentials) - "
-                    "scanned content was not read"
-                )
+                reason = model.unavailable_reason or "missing SDK or credentials"
+                warnings.append(f"vision backend unavailable: {reason}")
                 status = AgentStatus.PARTIAL
             else:
                 for sheet in vision_sheets:

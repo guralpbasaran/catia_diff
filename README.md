@@ -16,6 +16,7 @@ prioritised, marked-up report.*
 | Aile | Örnek bulgular |
 | --- | --- |
 | Ölçülendirme (`DIM001–DIM015`) | **konumu belirlenmemiş delik**, ölçü zincirine bağlanmamış geometri, ölçüsüz görünüş, ölçülendirilmemiş delik, kapalı ölçü zinciri (aşırı ölçülendirme), **ölçü metni geometriyle uyuşmuyor**, eksik ⌀ sembolü, toplam ölçü yok, açısı verilmemiş eğik kenar |
+| Referanslar (`REF001–REF007`) | **görünüşü olmayan kesit işareti**, işareti olmayan kesit görünüşü, aynı harfin iki kez kullanılması, yazılmamış nota gönderme, var olmayan sayfaya gönderme, çizilmemiş görünüşe gönderme, yetim görünüş başlığı |
 | Görünüşler arası (`CRV001–CRV003`) | **hizalı görünüşler aynı ölçüyü farklı veriyor**, görünüş geometrileri uyuşmuyor, aynı ölçü iki görünüşte tekrarlanmış |
 | Tolerans (`TOL001–TOL012`) | toleranssız ölçü (genel tolerans notu yoksa majör), ters/sıfır tolerans aralığı, ondalık hane uyumsuzluğu, gerçekçi olmayan dar tolerans, karışık gösterim, **ISO 2768 ve ISO 286 sayısal denetimleri** (aşağıya bakın) |
 | Geometrik tolerans (`GDT001–GDT011`) | tanımsız datum referansı, datumsuz diklik/konum toleransı, datumlu biçim toleransı, tekrarlanan datum, teorik ölçüsü olmayan konum toleransı, genel geometrik toleranstan geniş çerçeve |
@@ -23,7 +24,7 @@ prioritised, marked-up report.*
 | Antet (`TB001–TB011`) | antet yok, zorunlu alan boş, "TBD" yer tutucusu, standart dışı ölçek, tarihsiz revizyon, çizen = onaylayan, izdüşüm yöntemi yok, birim yok, sayfa numarası tutarsız |
 | Tutarlılık (`CON001–CON006`) | karışık birimler, ölçek–geometri uyuşmazlığı, sayfalar arası resim no çakışması, görsel çıkarım yapılmadan okunamayan sayfa |
 
-Tam liste: `catia-diff rules --lang tr` (63 kural)
+Tam liste: `catia-diff rules --lang tr` (70 kural)
 
 ### ISO 286 geçme sınıfları sayısal olarak
 
@@ -68,6 +69,30 @@ KRITIK DIM011  (12.0, 10.0), (68.0, 10.0) konumundaki ⌀6.5 unsuru Y ekseninde
 GD&T konum toleransı, `4x ⌀6.5 EŞİT BÖLÜNMÜŞ` patern notu, blanket notlar
 (`TÜM RADYÜSLER R3`) ve referans ölçüler ayrıca ele alınır — ayrıntılar ve sınırlar:
 [`docs/DIMENSION_COVERAGE.md`](docs/DIMENSION_COVERAGE.md).
+
+### Referans bütünlüğü
+
+Bir resim, birbirini gösteren işaretlerin ağıdır: kesit düzlemi bir görünüşü,
+not numarası bir notu, başlık geldiği işareti gösterir. Uygulama her
+**kullanımın** tam olarak bir **bildirime** çözüldüğünü denetler — çözümleme
+belge genelindedir, çünkü kesit bir sayfada alınıp başka sayfada çizilebilir.
+
+```
+catia-diff audit examples/sample_refs.dxf --lang tr --category reference
+  KRITIK  REF001  Resimde A-A kesit işareti var ancak belgede 'KESİT A-A' başlıklı görünüş yok.
+  MAJÖR   REF004  Sayfa 7 numaralı nota gönderme yapıyor ancak böyle bir not yazılmamış.
+  MAJÖR   REF006  Sayfa 'detay C' göndermesi yapıyor ancak belgede böyle bir görünüş yok.
+  MINÖR   REF007  'KESİT B-B' başlığı hiçbir geometriye ait olamayacak kadar uzakta duruyor.
+```
+
+Ayrım gramerde yapılır: `KESİT A-A` bir **başlıktır**, `DETAY C'YE BAKINIZ` bir
+**göndermedir**. Tek harfli bir işaret (detay balonu) ancak balon geometrisiyle
+birlikte sayılır — tek harf, datum sembolünün de yazılış biçimidir.
+
+Kapı kuralı: belgede **hiçbir** kesit işareti tanınamadıysa `REF002` hiç
+çalışmaz. Çizim ofisleri kesiti farklı işaretler; tespit tutmuyorsa kural
+susar, her başlığı "işaretsiz" diye yakmaz. Ayrıntı:
+[`docs/REFERENCES.md`](docs/REFERENCES.md).
 
 ### Görünüşler arası tutarlılık
 
@@ -146,6 +171,11 @@ catia-diff audit examples/sample_2768.dxf --lang tr --out reports
 # Tam ölçülendirilmiş varyant: kapsam kuralları hiç bulgu üretmemeli
 python examples/generate_sample_drawing.py examples/sample_ok.dxf --complete
 catia-diff audit examples/sample_ok.dxf --lang tr --out reports
+
+# Kırık referanslar: sarkan kesit işareti, yazılmamış nota gönderme (ve doğru varyantı)
+python examples/generate_sample_drawing.py examples/sample_refs.dxf --refs
+python examples/generate_sample_drawing.py examples/sample_refs_ok.dxf --refs --complete
+catia-diff audit examples/sample_refs.dxf --lang tr --category reference
 
 # Üç ortografik görünüş: görünüşler arası çelişki (ve doğru varyantı)
 python examples/generate_sample_drawing.py examples/sample_views.dxf --views
@@ -249,7 +279,8 @@ Ayrıntılar, akış diyagramı, mesaj protokolü ve veri modeli:
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · ISO 2768 sayısal referansı:
 [`docs/ISO2768.md`](docs/ISO2768.md) · ISO 286 geçme referansı:
 [`docs/ISO286.md`](docs/ISO286.md) · eksik ölçülendirme modeli:
-[`docs/DIMENSION_COVERAGE.md`](docs/DIMENSION_COVERAGE.md).
+[`docs/DIMENSION_COVERAGE.md`](docs/DIMENSION_COVERAGE.md) · referans bütünlüğü:
+[`docs/REFERENCES.md`](docs/REFERENCES.md).
 
 ## Yeni kural ekleme / Adding a rule
 
@@ -283,7 +314,7 @@ Kayıt otomatiktir; CLI, rapor ve testler kuralı hemen görür.
 ## Geliştirme / Development
 
 ```bash
-pytest -q                      # 374 test, isteğe bağlı bağımlılık yoksa atlanır
+pytest -q                      # 421 test, isteğe bağlı bağımlılık yoksa atlanır
 pytest --cov=catia_diff        # ~%91 kapsam
 ruff check src tests examples run_ui.py
 ```
@@ -303,6 +334,11 @@ katmanıyla doğrulanır.
   kurallar sessizce çalışmaz (yanlış sonuç üretmek yerine) ve `CON005` durumu bildirir.
 * Unsur–ölçü eşleştirmesi ve kapalı zincir (raster yolda) sezgiseldir;
   bulgular `confidence < 1.0` ile işaretlenir.
+* Referans denetimi **tanınabilen** işaretlerle sınırlıdır: kesit düzlemi harf
+  çiftinden (`A-A`), detay balonu tek harf + daire geometrisinden tanınır. Hiç
+  işaret tanınamayan bir resimde `REF002` çalışmaz (yanlış pozitif yerine
+  sessizlik). Not ve sayfa göndermeleri yalnızca açık kalıpta (`NOT 3`,
+  `SAYFA 2`) çözülür; "yukarıdaki nota bakınız" gibi ifadeler denetlenmez.
 * DWG doğrudan okunmaz.
 * Pano yerel ve tek kullanıcılıktır: kimlik doğrulama, oturum ve kalıcı depolama
   yoktur, yüklenen dosya geçici klasöre yazılır (son 5 koşu tutulur). Ağa açmak

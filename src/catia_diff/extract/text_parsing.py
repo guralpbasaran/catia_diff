@@ -714,3 +714,164 @@ def detect_blanket_notes(text: str | None) -> frozenset[str]:
     return frozenset(
         category for category, pattern in _BLANKET_PATTERNS if pattern.search(normalized)
     )
+
+
+# --------------------------------------------------------------------------
+# Reference integrity: captions, markers, note and sheet pointers
+# --------------------------------------------------------------------------
+#: "KESİT A-A", "SECTION A-A (2:1)", "DETAY B", "VIEW C".
+_CAPTION_RE = re.compile(
+    r"^\s*(?P<kind>KES[İI]T|SECTION|DETAY|DETAIL|G[ÖO]R[ÜU]N[ÜU][ŞS]|GORUNUS|VIEW)\s*"
+    r"(?P<label>[A-Z])\s*(?:[-–—]\s*(?P<second>[A-Z]))?"
+    # A title ends after its letter, give or take a scale.  Anything else
+    # ("DETAY C'YE BAKINIZ") is prose pointing at a view, not the view's title.
+    r"(?:\s*(?:SCALE|[ÖO]L[ÇC]EK)?\s*\(?\s*(?P<scale>\d{1,3}\s*:\s*\d{1,3})\s*\)?)?\s*$",
+    re.IGNORECASE,
+)
+
+#: A bare cutting-plane letter pair: "A-A", "B–B".  A *single* letter is not
+#: matched here: on its own it is indistinguishable from a datum symbol, so a
+#: detail bubble is recognised from its geometry instead (rules/markers.py).
+_MARKER_PAIR_RE = re.compile(r"^\s*([A-Z])\s*[-–—]\s*([A-Z])\s*$")
+
+#: A bare single letter, the text half of a detail bubble.
+_MARKER_SINGLE_RE = re.compile(r"^\s*([A-Z])\s*$")
+
+#: "1. KESKİN KÖŞELER KIRILACAK" - a numbered note being *declared*.
+_NOTE_DECLARATION_RE = re.compile(r"(?m)^\s*(\d{1,2})\s*[.)\-]\s+\S")
+
+#: "BKZ NOT 3", "NOT 3'E BAKINIZ", "SEE NOTE 3", "NOTE 3".
+_NOTE_REFERENCE_RE = re.compile(
+    r"(?:BKZ\.?|BAKINIZ|BAK|SEE|PER|REF\.?)?\s*"
+    r"(?:NOT|NOTE)\s*(?:NO\.?|NR\.?)?\s*(\d{1,2})\b",
+    re.IGNORECASE,
+)
+
+#: "DETAY SAYFA 2", "SEE SHEET 3".  A sheet *number* written as "1/2" is the
+#: title block stating which sheet this is, not a pointer to another one.
+_SHEET_REFERENCE_RE = re.compile(
+    r"\b(?:SAYFA|SHEET|SH)\.?\s*(\d{1,2})\b(?!\s*[/\\])",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class ParsedCaption:
+    """A view title: what kind of view it is and which letter it answers to."""
+
+    kind: str  # "section" | "detail" | "view"
+    label: str  # "A-A" for a section, "B" for a detail
+    scale: str | None = None
+
+
+def parse_view_caption(raw: str | None) -> ParsedCaption | None:
+    """Read 'KESİT A-A (2:1)' into its kind, its letter and its scale."""
+    text = normalize_drawing_text(raw)
+    if not text:
+        return None
+    match = _CAPTION_RE.match(text)
+    if not match:
+        return None
+    word = match.group("kind").upper()
+    if word.startswith(("KES", "SEC")):
+        kind = "section"
+    elif word.startswith(("DETA", "DETAI")):
+        kind = "detail"
+    else:
+        kind = "view"
+    label = match.group("label").upper()
+    second = match.group("second")
+    if second:
+        label = f"{label}-{second.upper()}"
+    elif kind == "section":
+        # A section is cut along a plane marked at both ends; "SECTION A" is
+        # the same reference as "SECTION A-A" and has to match the marker.
+        label = f"{label}-{label}"
+    scale = match.group("scale")
+    return ParsedCaption(kind=kind, label=label, scale=re.sub(r"\s+", "", scale) if scale else None)
+
+
+def parse_marker_label(raw: str | None) -> str | None:
+    """The letter pair of a cutting-plane marker ('A-A'), or ``None``."""
+    text = normalize_drawing_text(raw)
+    if not text:
+        return None
+    match = _MARKER_PAIR_RE.match(text)
+    if not match:
+        return None
+    return f"{match.group(1).upper()}-{match.group(2).upper()}"
+
+
+def parse_bubble_label(raw: str | None) -> str | None:
+    """The single letter of a detail bubble ('B'), or ``None``.
+
+    Only meaningful together with the geometry it sits on: on its own a bare
+    letter is also how a datum feature symbol is written.
+    """
+    text = normalize_drawing_text(raw)
+    if not text:
+        return None
+    match = _MARKER_SINGLE_RE.match(text)
+    return match.group(1).upper() if match else None
+
+
+def declared_notes(text: str | None) -> set[int]:
+    """The numbers of the notes this sheet writes out."""
+    normalized = normalize_drawing_text(text)
+    if not normalized:
+        return set()
+    return {int(number) for number in _NOTE_DECLARATION_RE.findall(normalized)}
+
+
+def referenced_notes(text: str | None) -> set[int]:
+    """The note numbers this sheet points at ('BKZ NOT 3')."""
+    normalized = normalize_drawing_text(text)
+    if not normalized:
+        return set()
+    return {int(number) for number in _NOTE_REFERENCE_RE.findall(normalized)}
+
+
+def referenced_sheets(text: str | None) -> set[int]:
+    """The sheet numbers this sheet points at ('DETAY SAYFA 2')."""
+    normalized = normalize_drawing_text(text)
+    if not normalized:
+        return set()
+    return {int(number) for number in _SHEET_REFERENCE_RE.findall(normalized)}
+
+
+#: A view named *inside* running text ("YÜZEY İÇİN BKZ KESİT A-A").  Unlike
+#: :func:`parse_view_caption` this searches rather than anchors: a title starts
+#: with the word, a mention does not.
+_VIEW_MENTION_RE = re.compile(
+    r"\b(?P<kind>KES[İI]T|SECTION|DETAY|DETAIL|G[ÖO]R[ÜU]N[ÜU][ŞS]|GORUNUS|VIEW)\s*"
+    r"(?P<label>[A-Z])(?:\s*[-–—]\s*(?P<second>[A-Z]))?\b",
+    re.IGNORECASE,
+)
+
+
+def view_references(raw: str | None) -> set[tuple[str, str]]:
+    """``{(kind, label)}`` for every view this text points at.
+
+    A text that *is* a view title declares one instead of pointing at one, so
+    those are left to :func:`parse_view_caption` and reported as empty here.
+    """
+    text = normalize_drawing_text(raw)
+    if not text or parse_view_caption(text) is not None:
+        return set()
+    out: set[tuple[str, str]] = set()
+    for match in _VIEW_MENTION_RE.finditer(text):
+        word = match.group("kind").upper()
+        if word.startswith(("KES", "SEC")):
+            kind = "section"
+        elif word.startswith(("DETA", "DETAI")):
+            kind = "detail"
+        else:
+            kind = "view"
+        label = match.group("label").upper()
+        second = match.group("second")
+        if second:
+            label = f"{label}-{second.upper()}"
+        elif kind == "section":
+            label = f"{label}-{label}"
+        out.add((kind, label))
+    return out

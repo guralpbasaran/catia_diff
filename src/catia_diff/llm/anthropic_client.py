@@ -28,6 +28,23 @@ T = TypeVar("T", bound=BaseModel)
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
+def _require_credentials(client: Any) -> None:
+    """Fail here, not inside the first request.
+
+    The SDK accepts a client with no credentials and only complains when a
+    request is built, by which time the exception is a ``TypeError`` from deep
+    inside its internals - it escapes the extraction agent's handling and ends
+    an audit in a traceback.  Checking up front keeps ``available`` honest, so
+    a drawing with no vector layer is *reported* as unread instead of crashing.
+    """
+    if getattr(client, "api_key", None) or getattr(client, "auth_token", None):
+        return
+    raise VisionUnavailableError(
+        "no Anthropic credentials found - set ANTHROPIC_API_KEY to read scanned "
+        "sheets, or pass --vision off to audit the vector content only"
+    )
+
+
 class AnthropicVisionModel(VisionModel):
     """Multimodal extraction through the Anthropic Messages API."""
 
@@ -36,7 +53,10 @@ class AnthropicVisionModel(VisionModel):
     def __init__(self, config: VisionConfig | None = None, client: Any | None = None) -> None:
         self.config = config or VisionConfig()
         self._client = client
+        #: Only a client we built ourselves is ours to vet for credentials.
+        self._owns_client = client is None
         self._beta_supported = True
+        self._unavailable_reason: str | None = None
 
     # ------------------------------------------------------------------
     @property
@@ -50,18 +70,36 @@ class AnthropicVisionModel(VisionModel):
                     "install it with: pip install 'catia-diff[llm]'"
                 ) from exc
             try:
-                self._client = anthropic.Anthropic(timeout=self.config.timeout_s)
-            except Exception as exc:  # missing credentials, bad proxy, ...
+                client = anthropic.Anthropic(timeout=self.config.timeout_s)
+            except Exception as exc:  # bad proxy, unreadable settings, ...
                 raise VisionUnavailableError(f"cannot create an Anthropic client: {exc}") from exc
+            _require_credentials(client)
+            self._client = client
         return self._client
 
     @property
     def available(self) -> bool:
         try:
             _ = self.client
-        except VisionUnavailableError:
+        except VisionUnavailableError as exc:
+            self._unavailable_reason = str(exc)
             return False
+        self._unavailable_reason = None
         return True
+
+    @property
+    def unavailable_reason(self) -> str | None:
+        return self._unavailable_reason
+
+    def _ensure_credentials(self) -> None:
+        """Vet our own client only.
+
+        An injected client is the caller's business: the tests pass a fake one
+        and a Bedrock or Vertex client authenticates in its own way, neither of
+        which carries an ``api_key``.
+        """
+        if self._owns_client:
+            _require_credentials(self.client)
 
     # ------------------------------------------------------------------
     def extract(
@@ -130,6 +168,10 @@ class AnthropicVisionModel(VisionModel):
                     **kwargs, betas=[FALLBACK_BETA], fallbacks="default"
                 )
             except (TypeError, AttributeError) as exc:
+                # The SDK raises TypeError for a missing credential too; ask the
+                # real question instead of reading the message, so a credential
+                # problem is not misfiled as "this SDK has no beta path".
+                self._ensure_credentials()
                 logger.debug("beta refusal-fallback path unavailable (%s); using plain path", exc)
                 self._beta_supported = False
             except anthropic.APIStatusError as exc:
@@ -139,6 +181,9 @@ class AnthropicVisionModel(VisionModel):
                 self._beta_supported = False
         try:
             return self.client.messages.create(**kwargs)
+        except TypeError as exc:
+            self._ensure_credentials()
+            raise VisionUnavailableError(f"the Anthropic SDK rejected the request: {exc}") from exc
         except anthropic.APIConnectionError as exc:
             raise VisionUnavailableError(f"cannot reach the Anthropic API: {exc}") from exc
         except anthropic.APIStatusError as exc:

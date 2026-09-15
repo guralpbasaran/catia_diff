@@ -257,6 +257,8 @@ def _raw_coordinates(
     """
     out: list[tuple[float, str, str]] = []
     for feature in features:
+        if _is_imaginary(feature):
+            continue  # a cutting plane is not a coordinate to dimension
         kind = "centerline" if _is_centerline(feature) else "outline"
         if feature.center is not None and feature.kind in {GeometryKind.CIRCLE, GeometryKind.ARC}:
             out.append((project(feature.center, axis), feature.id, "center"))
@@ -300,6 +302,12 @@ def _centerline_coordinates(
         if abs(math.cos(math.radians(direction - axis))) <= PERPENDICULAR_EPS:
             out.append((project(start, axis), feature.id, "centerline"))
     return out
+
+
+def _is_imaginary(feature: GeometryFeature) -> bool:
+    from catia_diff.rules.analysis import is_imaginary
+
+    return is_imaginary(feature)
 
 
 def _is_centerline(feature: GeometryFeature) -> bool:

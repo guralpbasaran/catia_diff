@@ -185,6 +185,22 @@ def sample_dxf_views_correct(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def sample_dxf_refs(tmp_path_factory) -> Path:
+    """A plate whose cross-references do not resolve."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_refs.dxf"
+    _sample_builder()(refs=True).saveas(target)
+    return target
+
+
+@pytest.fixture(scope="session")
+def sample_dxf_refs_correct(tmp_path_factory) -> Path:
+    """The same sheet with every reference resolved - the family's silence net."""
+    target = tmp_path_factory.mktemp("drawings") / "TD-1001_refs_ok.dxf"
+    _sample_builder()(refs=True, complete=True).saveas(target)
+    return target
+
+
+@pytest.fixture(scope="session")
 def sample_dxf_iso2768(tmp_path_factory) -> Path:
     """The same drawing plus an ISO 2768-mK note and the defects it exposes."""
     target = tmp_path_factory.mktemp("drawings") / "TD-1001_2768.dxf"

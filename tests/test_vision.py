@@ -218,3 +218,52 @@ def test_extraction_agent_degrades_when_vision_is_off(tmp_path):
     assert result.status is AgentStatus.PARTIAL
     assert any("vision" in warning for warning in result.warnings)
     assert not ctx.require_document().vision_used
+
+
+# ---------------------------------------------------------------------------
+# Credentials: a missing key must degrade, never crash the audit
+def test_missing_credentials_make_the_backend_unavailable(monkeypatch):
+    pytest.importorskip("anthropic")
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+
+    model = AnthropicVisionModel(VisionConfig())
+    assert model.available is False
+    assert "ANTHROPIC_API_KEY" in (model.unavailable_reason or "")
+
+
+def test_missing_credentials_raise_a_vision_error_not_a_type_error(monkeypatch):
+    """The SDK's own failure is a TypeError from deep inside it; ours is actionable."""
+    pytest.importorskip("anthropic")
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+
+    model = AnthropicVisionModel(VisionConfig())
+    with pytest.raises(VisionUnavailableError, match="--vision off"):
+        _ = model.client
+
+
+def test_an_injected_client_is_not_vetted():
+    """A fake, a Bedrock or a Vertex client carries no api_key - and need not."""
+    payload = sample_extraction().model_dump(mode="json")
+    model = AnthropicVisionModel(VisionConfig(), client=_Client(payload))
+    assert model.available is True
+    assert model.unavailable_reason is None
+
+
+def test_a_scan_without_a_key_is_reported_not_crashed(monkeypatch, tmp_path):
+    """End to end: no credentials, a real scan - a warning and a finding, no traceback."""
+    pytest.importorskip("anthropic")
+    Image = pytest.importorskip("PIL.Image")
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    path = tmp_path / "scan.png"
+    Image.new("RGB", (900, 600), "white").save(path)
+
+    config = AuditConfig(vision=VisionConfig(mode=VisionMode.AUTO), output_dir=tmp_path)
+    ctx = AuditContext(config=config, source_path=path, workdir=tmp_path / "work")
+    result = ExtractionAgent().execute(AgentTask(kind=TaskKind.EXTRACT), ctx)
+
+    assert result.status is AgentStatus.PARTIAL
+    assert any("ANTHROPIC_API_KEY" in warning for warning in result.warnings)
+    assert not ctx.require_document().vision_used

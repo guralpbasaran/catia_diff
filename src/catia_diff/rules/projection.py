@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from catia_diff.config import AuditConfig
 from catia_diff.models.drawing import Dimension, GeometryFeature, Sheet, View
 from catia_diff.models.geometry import BBox
+from catia_diff.rules.analysis import is_imaginary
 from catia_diff.rules.constraints import AxisCoverage, axis_label, project
 
 #: Measuring directions two views can share.
@@ -157,8 +158,18 @@ def _overlap_ratio(first: tuple[float, float], second: tuple[float, float]) -> f
 
 # ---------------------------------------------------------------------------
 def view_features(sheet: Sheet, view: View) -> list[GeometryFeature]:
+    """The part geometry of a view.
+
+    A cutting plane drawn across the view belongs to the *reference* it marks,
+    not to the part: letting it stretch the view's extent would make two
+    correctly drawn views look like they disagree.
+    """
     members = set(view.member_ids)
-    return [f for f in sheet.features if f.id in members and (f.points or f.center)]
+    return [
+        f
+        for f in sheet.features
+        if f.id in members and (f.points or f.center) and not is_imaginary(f)
+    ]
 
 
 def view_dimensions(sheet: Sheet, view: View) -> list[Dimension]:
